@@ -50,12 +50,13 @@ AVAILABLE SPECIALIST AGENTS:
 
 | Layer              | Technology                          | Role                                    | License/Cost    |
 |--------------------|-------------------------------------|-----------------------------------------|-----------------|
-| Agent Execution    | OpenClaw v0.x (247K GitHub stars)   | Agent runtime, gateway, channels        | MIT (Free)      |
+| Agent Execution    | OpenClaw v2026.3.13                 | Agent runtime, gateway, channels        | MIT (Free)      |
+| Sub-agent Spawning | ACPX Plugin                         | sessions_spawn, subagent runtime        | MIT (Free)      |
 | Security/Sandbox   | NVIDIA NemoClaw (alpha preview)     | OpenShell sandbox, policy enforcement   | Apache 2.0 (Free)|
-| Local Inference    | Ollama                              | Free local LLM inference, no rate limits| MIT (Free)      |
-| Cloud Inference    | Groq API (free tier)                | Ultra-fast cloud inference fallback     | Free tier       |
-| Cloud Inference    | Google Gemini API (free tier)       | Complex reasoning tasks                 | Free tier       |
-| Cloud Inference    | NVIDIA Nemotron (via Ollama)        | Agentic-optimized local model           | Open weights    |
+| Local Inference    | Ollama                              | Embeddings (nomic-embed-text)           | MIT (Free)      |
+| Primary Inference  | OpenAI gpt-4.1-mini                 | All 7 agents — best quality/cost ratio  | $0.20/$0.80 /1M |
+| Fallback Inference | Google Gemini 2.5 Flash (free tier) | Auto-fallback when OpenAI fails         | Free tier       |
+| Fallback Inference | Groq Llama 3.3 70B (free tier)      | Second fallback                         | Free tier       |
 | Orchestration      | Kubernetes (K3s for local)          | Container orchestration for agent pods  | Apache 2.0 (Free)|
 | Tool Protocol      | Model Context Protocol (MCP)        | Universal tool access standard          | Open standard   |
 | Persistent Memory  | PostgreSQL + pgvector               | Vectorized long-term agent memory       | PostgreSQL License|
@@ -74,19 +75,19 @@ AVAILABLE SPECIALIST AGENTS:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     HUMAN ADMIN INTERFACE                        │
-│              Telegram │ WhatsApp │ Web GUI (Next.js)             │
-└─────────────┬───────────────────────────────────┬───────────────┘
-              │                                   │
-              ▼                                   ▼
+│                   Telegram (@ohboy441clawbot)                    │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    OPENCLAW GATEWAY                              │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────────────┐  │
-│  │ Telegram  │ │ WhatsApp │ │ Web Chat │ │ Session Manager   │  │
-│  │ Channel   │ │ Channel  │ │ Channel  │ │ (Memory Router)   │  │
-│  └──────────┘ └──────────┘ └──────────┘ └───────────────────┘  │
-└─────────────┬───────────────────────────────────────────────────┘
-              │
-              ▼
+│                    OPENCLAW GATEWAY (port 3000)                  │
+│  ┌──────────────────┐  ┌────────────────┐  ┌─────────────────┐  │
+│  │ Telegram Channel  │  │ Session Manager│  │ ACPX Plugin     │  │
+│  │ (dmPolicy:pairing)│  │ (Memory Router)│  │ (subagent spawn)│  │
+│  └──────────────────┘  └────────────────┘  └─────────────────┘  │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │              NEMOCLAW GOVERNANCE LAYER                           │
 │  ┌──────────────┐ ┌──────────────┐ ┌────────────────────────┐  │
@@ -94,20 +95,19 @@ AVAILABLE SPECIALIST AGENTS:
 │  │ Sandbox      │ │ Engine       │ │ (Model Selection +     │  │
 │  │ (seccomp,    │ │ (YAML-based  │ │  API Key Vaulting)     │  │
 │  │  Landlock,   │ │  permissions)│ │                        │  │
-│  │  namespaces) │ │              │ │ Ollama ←→ Groq ←→     │  │
-│  └──────────────┘ └──────────────┘ │ Gemini ←→ Nemotron    │  │
-│                                     └────────────────────────┘  │
-└─────────────┬───────────────────────────────────────────────────┘
-              │
-              ▼
+│  │  namespaces) │ │              │ │ OpenAI → Gemini → Groq │  │
+│  └──────────────┘ └──────────────┘ └────────────────────────┘  │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    MASTER MANAGER AGENT                          │
-│              (High-reasoning: Llama 3.3 70B / Gemini)           │
+│              openai/gpt-4.1-mini — orchestrator                 │
 │                                                                  │
 │  Responsibilities:                                               │
-│  • Task decomposition & delegation                               │
-│  • Sub-agent lifecycle management                                │
-│  • Quality assurance & result aggregation                        │
+│  • Task decomposition & delegation (NEVER writes code itself)    │
+│  • Spawns sub-agents via sessions_spawn (runtime: subagent)      │
+│  • Autonomous pipeline: architect → coder → qa → fix → deliver  │
 │  • HITL escalation & DND enforcement                             │
 │  • 24/7 heartbeat monitoring                                     │
 └──────┬──────────┬──────────┬──────────┬──────────┬──────────────┘
@@ -117,14 +117,15 @@ AVAILABLE SPECIALIST AGENTS:
 │ARCHITECT ││ CODER    ││ DEVOPS   ││   QA     ││ RESEARCHER   │
 │ Agent    ││ Agent    ││ Agent    ││ Agent    ││ Agent        │
 │          ││          ││          ││          ││              │
-│Qwen 2.5 ││Qwen 2.5  ││Nemotron  ││DeepSeek  ││Llama 3.3    │
-│14B      ││Coder 14B ││Nano 30B  ││Coder    ││8B            │
+│gpt-4.1  ││gpt-4.1   ││gpt-4.1   ││gpt-4.1   ││gpt-4.1-mini │
+│mini     ││mini      ││mini      ││mini      ││              │
 └──────────┘└────┬─────┘└──────────┘└──────────┘└──────────────┘
                  │
                  ▼ (spawns if needed)
           ┌──────────────┐
           │ TOOL-MAKER   │
           │ Agent        │
+          │ gpt-4.1-mini │
           │ (builds MCP  │
           │  servers on  │
           │  demand)     │
@@ -319,17 +320,22 @@ AVAILABLE SPECIALIST AGENTS:
 
 ## 5. MODEL ROUTING STRATEGY
 
-| Task Type            | Model                    | Provider     | Cost  | Why                          |
-|----------------------|--------------------------|--------------|-------|------------------------------|
-| Master reasoning     | Llama 3.3 70B            | Groq         | Free  | Fast, high-quality reasoning |
-| Complex planning     | Gemini 1.5 Pro           | Google       | Free  | Large context, strong planning|
-| Code generation      | Qwen 2.5 Coder 14B      | Ollama       | Free  | Best open-source coder       |
-| System design        | Qwen 2.5 14B             | Ollama       | Free  | Good general reasoning       |
-| DevOps/Infra         | Nemotron Nano 30B        | Ollama       | Free  | Optimized for agentic tasks  |
-| Testing/QA           | DeepSeek Coder           | Ollama       | Free  | Strong code analysis         |
-| Quick research       | Llama 3.3 8B             | Ollama       | Free  | Fast, lightweight            |
-| Embeddings           | nomic-embed-text         | Ollama       | Free  | High-quality embeddings      |
-| Fallback reasoning   | DeepSeek R1 Distill 70B  | Groq         | Free  | When Llama is rate-limited   |
+**Current deployment (as of Session 8, 2026-03-22)**: ALL agents use `openai/gpt-4.1-mini` as primary with free cloud fallbacks.
+
+| Agent / Task         | Primary Model            | Fallback 1              | Fallback 2              | Cost (primary)  |
+|----------------------|--------------------------|-------------------------|-------------------------|-----------------|
+| master-manager       | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
+| architect            | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
+| coder                | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
+| devops               | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
+| qa                   | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
+| researcher           | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
+| tool-maker           | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
+| Embeddings           | nomic-embed-text (Ollama)| —                       | —                       | Free (local)    |
+
+**Why gpt-4.1-mini for everything**: Past experience with gpt-4.1-nano produced poor quality output for complex tasks (code generation, system design, research). gpt-4.1-mini provides significantly better quality at $0.20/$0.80 per 1M tokens — still budget-friendly (~$0.05–0.15 per complete project build on a $10 budget).
+
+**Reserved for future**: `openai/gpt-4.1` ($2.00/$8.00 /1M) is registered in config for highly complex projects that demand maximum quality. Requires explicit opt-in due to cost.
 
 ---
 

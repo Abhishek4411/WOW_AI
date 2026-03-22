@@ -11,10 +11,11 @@
 ## Project Overview
 
 **WOW AI** is an autonomous multi-agent orchestration platform. A single Master Manager
-agent receives user requests (via Telegram/WhatsApp/Web), decomposes them into tasks,
-and delegates to specialist sub-agents (architect, coder, devops, qa, researcher,
-tool-maker) that can themselves spawn more agents. All execution is sandboxed via
-NVIDIA NemoClaw. Inference uses OpenAI as primary (master-manager: gpt-4.1-mini, sub-agents: gpt-4.1-nano) with Gemini/Groq as free fallbacks. A2A delegation works end-to-end via ACPX plugin + `sessions_spawn`.
+agent receives user requests (via Telegram), decomposes them into tasks, and delegates
+to specialist sub-agents (architect, coder, devops, qa, researcher, tool-maker) via
+`sessions_spawn` with `runtime: "subagent"`. All execution is sandboxed via NVIDIA NemoClaw.
+**ALL agents use `openai/gpt-4.1-mini`** as primary, with Gemini/Groq as free fallbacks.
+GitHub: https://github.com/Abhishek4411/WOW_AI
 
 ---
 
@@ -28,7 +29,7 @@ NVIDIA NemoClaw. Inference uses OpenAI as primary (master-manager: gpt-4.1-mini,
 
 **FRESH RESTART (Session 7)**: Complete reset performed — all runtime state cleared while preserving code. PostgreSQL volume destroyed & recreated (7 tables, 0 rows), Redis FLUSHALL'd, all 12 OpenClaw agent sessions/memory/workspaces wiped, Telegram update queue flushed, device pairings reset, temp logs cleared. Validation: 54 PASS | 0 FAIL | 0 WARN.
 
-**A2A DELEGATION** (Session 8 fix): Master-manager delegates via `sessions_spawn` with `runtime: "subagent"` (NOT `"acp"` — WebSocket handshake bug on Windows v2026.3.13). Pipeline: User → Telegram → master-manager (gpt-4.1-mini) → sessions_spawn(subagent) → sub-agent (gpt-4.1-nano) → file output. Sub-agents don't read SOUL.md (bug #24852), so all instructions must be in the task text.
+**A2A DELEGATION** (Session 8 fix): Master-manager delegates via `sessions_spawn` with `runtime: "subagent"` (NOT `"acp"` — WebSocket handshake bug on Windows v2026.3.13). Pipeline: User → Telegram → master-manager (gpt-4.1-mini) → sessions_spawn(subagent) → sub-agent (gpt-4.1-mini) → file output. Sub-agents don't read SOUL.md (bug #24852), so all instructions must be in the task text.
 
 **Model assignments** (Session 8 upgrade — ALL agents on gpt-4.1-mini):
 - **ALL agents → `openai/gpt-4.1-mini`** ($0.20/$0.80 per 1M tokens)
@@ -188,9 +189,16 @@ NVIDIA NemoClaw. Inference uses OpenAI as primary (master-manager: gpt-4.1-mini,
 |80 | `acp-wrapper.mjs` created | DONE | Filters non-JSON stdout from `openclaw acp` (fixes ACPX JSON-RPC parser crash) |
 |81 | `gateway.tools.allow` set | DONE | `["sessions_spawn", "sessions_send"]` — removes these from HTTP API deny list |
 |82 | Chat Completions HTTP endpoint enabled | DONE | `gateway.http.endpoints.chatCompletions.enabled: true` |
-|83 | Model split: master=gpt-4.1-mini, sub=gpt-4.1-nano | DONE | Master needs reasoning for orchestration; sub-agents handle simpler tasks at lower cost |
+|83 | Model split: master=gpt-4.1-mini, sub=gpt-4.1-nano | DONE | Later upgraded — nano produced poor quality |
 |84 | **A2A test: Tic-Tac-Toe .exe built by coder** | DONE | Master-manager delegated via `sessions_spawn` → coder agent built tictactoe.exe (32 MB) autonomously |
 |85 | `try_out_demos/` folder convention added | DONE | All agent-built projects go in `wow_ai/try_out_demos/{project-name}/` |
+|86 | **Switched runtime: acp → subagent** | DONE | ACP WebSocket handshake times out on Windows (bug #50380, 3s timeout). `subagent` runs in-process, no WebSocket needed. |
+|87 | Added `subagents.allowAgents` to master-manager | DONE | Required for `sessions_spawn` permission — without this, master-manager can't spawn any agents |
+|88 | SOUL.md full rewrite — full autonomy mode | DONE | Added "NEVER ASK, JUST DO" rule, auto-chaining pipeline (architect→coder→qa), ONE start + ONE end message only |
+|89 | **ALL agents upgraded to gpt-4.1-mini** | DONE | Session 8: nano produced poor quality code. All 7 agents now use mini ($0.20/$0.80 /1M). Nano only for truly trivial classification. |
+|90 | E-commerce website built by agents | DONE | `try_out_demos/website/` — full frontend + backend built autonomously via agent pipeline |
+|91 | Docs updated (README, BLUEPRINT, PROJECT_NOTES) | DONE | All docs reflect: mini for all agents, subagent runtime, current pipeline, GitHub URL |
+|92 | **Pushed to GitHub** | DONE | Public repo: https://github.com/Abhishek4411/WOW_AI — 53 files, single contributor (Abhishek4411) |
 
 ---
 

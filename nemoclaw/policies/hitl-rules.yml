@@ -1,0 +1,107 @@
+# =============================================================================
+# Human-in-the-Loop (HITL) Rules
+# =============================================================================
+# Defines when the system MUST pause and request human authorization.
+# =============================================================================
+
+version: "1.0"
+
+# --- Actions that ALWAYS require human approval ---
+mandatory_approval:
+  - action: "deploy_to_production"
+    description: "Any deployment to production Kubernetes namespace"
+    channel: "telegram"
+    timeout_hours: 24
+    on_timeout: "queue_and_skip"
+
+  - action: "push_to_main_branch"
+    description: "Pushing code to main/master branch of any repository"
+    channel: "telegram"
+    timeout_hours: 24
+    on_timeout: "queue_and_skip"
+
+  - action: "create_cloud_resource"
+    description: "Creating any resource that incurs financial cost"
+    channel: "telegram"
+    timeout_hours: 48
+    on_timeout: "deny"
+
+  - action: "modify_security_policy"
+    description: "Any change to NemoClaw policies or agent permissions"
+    channel: "telegram"
+    timeout_hours: 24
+    on_timeout: "deny"
+
+  - action: "access_new_external_api"
+    description: "Connecting to an API not in the pre-approved list"
+    channel: "telegram"
+    timeout_hours: 12
+    on_timeout: "deny"
+
+  - action: "delete_data"
+    description: "Deleting any persistent data (database records, files, repos)"
+    channel: "telegram"
+    timeout_hours: 24
+    on_timeout: "deny"
+
+# --- Actions that trigger alerts but don't block ---
+notification_only:
+  - action: "agent_crash_recovered"
+    description: "An agent crashed but was auto-recovered"
+    channel: "telegram"
+    respect_dnd: true
+
+  - action: "rate_limit_hit"
+    description: "API rate limit triggered, falling back to alternative"
+    channel: "telegram"
+    respect_dnd: true
+
+  - action: "task_milestone"
+    description: "A major task milestone was completed"
+    channel: "telegram"
+    respect_dnd: true
+
+  - action: "daily_summary"
+    description: "Daily progress report"
+    channel: "telegram"
+    respect_dnd: true
+
+# --- Critical alerts that OVERRIDE DND ---
+dnd_override:
+  - action: "cluster_down"
+    description: "Kubernetes cluster is unresponsive"
+    channel: "telegram"
+    urgency: "critical"
+
+  - action: "security_breach"
+    description: "Potential security breach detected"
+    channel: "telegram"
+    urgency: "critical"
+
+  - action: "all_agents_failed"
+    description: "All active agents have failed simultaneously"
+    channel: "telegram"
+    urgency: "critical"
+
+  - action: "data_loss_detected"
+    description: "Potential data loss event"
+    channel: "telegram"
+    urgency: "critical"
+
+  - action: "database_unreachable"
+    description: "PostgreSQL is down and recovery failed"
+    channel: "telegram"
+    urgency: "critical"
+
+# --- Approval message format ---
+message_template: |
+  🔒 [ACTION REQUIRED]
+
+  **Action**: {action_description}
+  **Requested by**: {agent_name}
+  **Project**: {project_name}
+  **Details**: {details}
+  **Risk Level**: {risk_level}
+
+  Reply "approved" or "denied"
+  Auto-action on timeout ({timeout}): {on_timeout}

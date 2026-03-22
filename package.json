@@ -1,0 +1,15 @@
+{
+  "name": "wow_ai",
+  "version": "1.0.0",
+  "description": "An autonomous AI platform where a single **Master Manager** agent decomposes any software task and delegates it to a dynamically spawned army of specialist sub-agents. Agents communicate peer-to-peer, create more agents when needed, and operate 24/7 with minimal human intervention.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "js-yaml": "^4.1.1"
+  }
+}

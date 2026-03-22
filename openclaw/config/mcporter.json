@@ -1,0 +1,74 @@
+{
+  "$schema": "https://docs.openclaw.ai/schema/mcporter.json",
+  "mcpServers": {
+    "kubernetes-mcp": {
+      "description": "Kubernetes cluster management — pod operations, deployments, logs",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-kubernetes"],
+      "env": {
+        "KUBECONFIG": "${HOME}/.kube/config",
+        "K8S_NAMESPACE": "wow-ai-agents"
+      },
+      "allowedAgents": ["devops", "master-manager"]
+    },
+    "github-mcp": {
+      "description": "GitHub repository management — repos, PRs, issues, code",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "allowedAgents": ["architect", "coder", "qa", "tool-maker", "master-manager"]
+    },
+    "postgres-mcp": {
+      "description": "PostgreSQL database operations — queries, schemas, migrations",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres"],
+      "env": {
+        "DATABASE_URL": "${DATABASE_URL}"
+      },
+      "allowedAgents": ["architect", "master-manager"]
+    },
+    "filesystem-mcp": {
+      "description": "Sandboxed filesystem operations — read, write, search files",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/sandbox"],
+      "env": {},
+      "allowedAgents": ["architect", "coder", "devops", "qa", "tool-maker"]
+    },
+    "browser-mcp": {
+      "description": "Web browsing and automation — research, documentation, testing",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-puppeteer"],
+      "env": {
+        "PUPPETEER_HEADLESS": "true"
+      },
+      "allowedAgents": ["researcher"]
+    },
+    "docker-mcp": {
+      "description": "Docker container management — build, push, tag images",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-server-docker"],
+      "env": {
+        "DOCKER_HOST": "unix:///var/run/docker.sock"
+      },
+      "allowedAgents": ["devops"]
+    },
+    "redis-mcp": {
+      "description": "Redis cache operations — get, set, pub/sub",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-server-redis"],
+      "env": {
+        "REDIS_URL": "redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}"
+      },
+      "allowedAgents": ["master-manager"]
+    }
+  }
+}

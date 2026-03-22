@@ -1,0 +1,158 @@
+# =============================================================================
+# Agent Permissions — Capability Restrictions per Agent Type
+# =============================================================================
+# Principle of Least Privilege: agents only get what they need.
+# =============================================================================
+
+version: "1.0"
+
+permissions:
+  master-manager:
+    canSpawnAgents: true
+    canTerminateAgents: true
+    canAccessMemory: true
+    canSendHumanMessages: true
+    canModifyPolicies: false          # Requires human approval
+    canAccessAllMcpServers: true
+    canExecuteShell: false            # Master delegates, never executes
+    canDeployToProduction: false      # Requires HITL approval
+    maxSubAgents: 5
+
+  architect:
+    canSpawnAgents: false
+    canTerminateAgents: false
+    canAccessMemory: true
+    canSendHumanMessages: false       # Only via Master
+    canModifyPolicies: false
+    canExecuteShell: false
+    canDeployToProduction: false
+    allowedMcpServers:
+      - "postgres-mcp"
+      - "github-mcp"
+      - "filesystem-mcp"
+    allowedFileOperations:
+      - read
+      - write                         # Design docs, schemas
+    allowedDirectories:
+      - "/sandbox/designs"
+      - "/sandbox/schemas"
+
+  coder:
+    canSpawnAgents: true              # Can spawn tool-maker if needed
+    canTerminateAgents: false
+    canAccessMemory: true
+    canSendHumanMessages: false
+    canModifyPolicies: false
+    canExecuteShell: true             # Needs shell for builds, tests
+    canDeployToProduction: false
+    allowedMcpServers:
+      - "filesystem-mcp"
+      - "github-mcp"
+    allowedFileOperations:
+      - read
+      - write
+      - execute
+    allowedDirectories:
+      - "/sandbox/src"
+      - "/sandbox/tests"
+      - "/sandbox/node_modules"
+      - "/tmp"
+    allowedShellCommands:
+      - "npm *"
+      - "npx *"
+      - "node *"
+      - "python *"
+      - "pip *"
+      - "git *"
+      - "cargo *"
+      - "go *"
+      - "make *"
+      - "cat *"
+      - "ls *"
+      - "mkdir *"
+    blockedShellCommands:
+      - "rm -rf /"
+      - "sudo *"
+      - "chmod 777 *"
+      - "curl * | bash"
+      - "wget * | bash"
+
+  devops:
+    canSpawnAgents: false
+    canTerminateAgents: false
+    canAccessMemory: true
+    canSendHumanMessages: false
+    canModifyPolicies: false
+    canExecuteShell: true
+    canDeployToProduction: false      # Must go through Master → HITL
+    allowedMcpServers:
+      - "kubernetes-mcp"
+      - "docker-mcp"
+      - "filesystem-mcp"
+    allowedShellCommands:
+      - "kubectl *"
+      - "helm *"
+      - "docker build *"
+      - "docker push *"
+      - "docker tag *"
+    blockedShellCommands:
+      - "kubectl delete namespace *"
+      - "kubectl delete --all *"
+      - "docker system prune *"
+
+  qa:
+    canSpawnAgents: false
+    canTerminateAgents: false
+    canAccessMemory: true
+    canSendHumanMessages: false
+    canModifyPolicies: false
+    canExecuteShell: true             # Needs to run tests
+    canDeployToProduction: false
+    allowedMcpServers:
+      - "github-mcp"
+      - "filesystem-mcp"
+    allowedShellCommands:
+      - "npm test *"
+      - "npm run test *"
+      - "npx jest *"
+      - "npx vitest *"
+      - "python -m pytest *"
+      - "go test *"
+      - "cargo test *"
+    allowedFileOperations:
+      - read                          # QA reads code, doesn't write it
+
+  researcher:
+    canSpawnAgents: false
+    canTerminateAgents: false
+    canAccessMemory: true
+    canSendHumanMessages: false
+    canModifyPolicies: false
+    canExecuteShell: false            # Research only, no execution
+    canDeployToProduction: false
+    allowedMcpServers:
+      - "browser-mcp"
+    allowedFileOperations:
+      - read                          # Can read docs, not modify code
+
+  tool-maker:
+    canSpawnAgents: false
+    canTerminateAgents: false
+    canAccessMemory: true
+    canSendHumanMessages: false
+    canModifyPolicies: false
+    canExecuteShell: true
+    canDeployToProduction: false
+    allowedMcpServers:
+      - "filesystem-mcp"
+      - "github-mcp"
+    allowedShellCommands:
+      - "npm *"
+      - "npx *"
+      - "node *"
+      - "python *"
+      - "pip *"
+      - "git *"
+    allowedDirectories:
+      - "/sandbox/mcp-servers"
+      - "/tmp"

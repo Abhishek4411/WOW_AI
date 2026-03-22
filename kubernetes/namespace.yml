@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wow-ai-agents
+  labels:
+    app: wow-ai
+    managed-by: nemoclaw

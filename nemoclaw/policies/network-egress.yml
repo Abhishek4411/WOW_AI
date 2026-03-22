@@ -1,0 +1,142 @@
+# =============================================================================
+# Network Egress Policies — Per-Agent Network Access Control
+# =============================================================================
+# Default: DENY ALL. Each agent must have explicit allowlists.
+# NemoClaw OpenShell proxy drops unauthorized packets automatically.
+# =============================================================================
+
+version: "1.0"
+defaultPolicy: "deny"
+
+# --- Master Manager ---
+agents:
+  master-manager:
+    egress:
+      - description: "Groq API for reasoning"
+        host: "api.groq.com"
+        port: 443
+        protocol: "https"
+      - description: "Gemini API for complex planning"
+        host: "generativelanguage.googleapis.com"
+        port: 443
+        protocol: "https"
+      - description: "Telegram Bot API"
+        host: "api.telegram.org"
+        port: 443
+        protocol: "https"
+      - description: "Local Ollama"
+        host: "host.docker.internal"
+        port: 11434
+        protocol: "http"
+      - description: "Internal PostgreSQL"
+        host: "postgres"
+        port: 5432
+        protocol: "tcp"
+      - description: "Internal Redis"
+        host: "redis"
+        port: 6379
+        protocol: "tcp"
+
+  # --- Architect Agent ---
+  architect:
+    egress:
+      - description: "Local Ollama"
+        host: "host.docker.internal"
+        port: 11434
+        protocol: "http"
+      - description: "Internal PostgreSQL"
+        host: "postgres"
+        port: 5432
+        protocol: "tcp"
+      - description: "GitHub API"
+        host: "api.github.com"
+        port: 443
+        protocol: "https"
+
+  # --- Coder Agent ---
+  coder:
+    egress:
+      - description: "Local Ollama"
+        host: "host.docker.internal"
+        port: 11434
+        protocol: "http"
+      - description: "GitHub API"
+        host: "api.github.com"
+        port: 443
+        protocol: "https"
+      - description: "npm registry (package installs)"
+        host: "registry.npmjs.org"
+        port: 443
+        protocol: "https"
+      - description: "PyPI (Python packages)"
+        host: "pypi.org"
+        port: 443
+        protocol: "https"
+
+  # --- DevOps Agent ---
+  devops:
+    egress:
+      - description: "Local Ollama"
+        host: "host.docker.internal"
+        port: 11434
+        protocol: "http"
+      - description: "Kubernetes API"
+        host: "kubernetes.default.svc"
+        port: 443
+        protocol: "https"
+      - description: "Docker Hub (image pulls)"
+        host: "registry-1.docker.io"
+        port: 443
+        protocol: "https"
+      - description: "Docker auth"
+        host: "auth.docker.io"
+        port: 443
+        protocol: "https"
+
+  # --- QA Agent ---
+  qa:
+    egress:
+      - description: "Local Ollama"
+        host: "host.docker.internal"
+        port: 11434
+        protocol: "http"
+      - description: "GitHub API"
+        host: "api.github.com"
+        port: 443
+        protocol: "https"
+
+  # --- Researcher Agent ---
+  researcher:
+    egress:
+      - description: "Local Ollama"
+        host: "host.docker.internal"
+        port: 11434
+        protocol: "http"
+      - description: "Web browsing (broad access for research)"
+        host: "*"
+        port: 443
+        protocol: "https"
+      - description: "Web browsing HTTP"
+        host: "*"
+        port: 80
+        protocol: "http"
+    # Researcher has broad access but CANNOT write to filesystem or databases
+    restrictions:
+      - noFilesystemWrite: true
+      - noDatabaseAccess: true
+
+  # --- Tool Maker Agent ---
+  tool-maker:
+    egress:
+      - description: "Local Ollama"
+        host: "host.docker.internal"
+        port: 11434
+        protocol: "http"
+      - description: "GitHub API"
+        host: "api.github.com"
+        port: 443
+        protocol: "https"
+      - description: "npm registry"
+        host: "registry.npmjs.org"
+        port: 443
+        protocol: "https"

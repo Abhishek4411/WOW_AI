@@ -1,0 +1,73 @@
+# =============================================================================
+# WOW AI — Local Development Stack
+# =============================================================================
+# Usage: docker compose up -d
+# Requires: Docker, .env file (copy from .env.example)
+#
+# SERVICE LAYOUT (2026-03-20):
+#   - PostgreSQL: runs in Docker (pgvector extension needed)
+#   - Redis:      uses host Memurai service (port 6379) — no Docker container
+#   - Ollama:     runs on host natively (port 11434) — no Docker container
+#   - OpenClaw:   runs in Docker, connects to all above
+# =============================================================================
+
+services:
+  # --- PostgreSQL with pgvector for agent memory ---
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: wow-ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wow_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-wow_ai_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_to_a_strong_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./memory/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wow_ai_admin} -d ${POSTGRES_DB:-wow_ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- OpenClaw Gateway ---
+  # Connects to: Docker PostgreSQL, host Memurai (Redis), host Ollama
+  openclaw-gateway:
+    image: node:20-slim
+    container_name: wow-ai-openclaw
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "
+        npm install -g openclaw 2>/dev/null || true &&
+        openclaw gateway start --config /config/openclaw.json
+      "
+    ports:
+      - "${OPENCLAW_GATEWAY_PORT:-3000}:3000"
+      - "8081:8081"
+    volumes:
+      - ./openclaw:/config
+      - ./agents:/agents
+      - openclaw_data:/root/.openclaw
+    environment:
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-wow_ai_admin}:${POSTGRES_PASSWORD:-change_this_to_a_strong_password}@postgres:5432/${POSTGRES_DB:-wow_ai}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-change_this_redis_password}@host.docker.internal:6379
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+    driver: local
+  openclaw_data:
+    driver: local

@@ -1,0 +1,30 @@
+# =============================================================================
+# GPU Time-Slicing Configuration for NVIDIA GPUs
+# =============================================================================
+# Allows multiple agent pods to share a single GPU.
+# Requires: NVIDIA GPU Operator installed on the K8s cluster.
+#
+# Apply with: kubectl apply -f gpu-time-slicing-config.yml
+# Then label the node: kubectl label node <node-name> nvidia.com/device-plugin.config=time-slicing
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nvidia-device-plugin-config
+  namespace: wow-ai-agents
+data:
+  time-slicing: |
+    version: v1
+    sharing:
+      timeSlicing:
+        renameByDefault: false
+        failRequestsGreaterThanOne: false
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 4
+            # Each replica gets ~25% of GPU time
+            # Adjust replicas based on your GPU memory:
+            #   24GB VRAM (RTX 3090/4090): replicas: 4 (6GB each)
+            #   16GB VRAM (RTX 4080):      replicas: 2 (8GB each)
+            #   48GB VRAM (A6000):          replicas: 8 (6GB each)

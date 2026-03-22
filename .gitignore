@@ -1,0 +1,60 @@
+# Environment and secrets
+.env
+*.env.local
+
+# Node modules
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker volumes (managed by Docker)
+postgres_data/
+redis_data/
+ollama_data/
+
+# Sandbox directories (agent workspaces)
+/sandbox/
+
+# OpenClaw auto-generated files in agent dirs (managed by CLI, not version-controlled)
+agents/*/.openclaw/
+agents/*/AGENTS.md
+agents/*/BOOTSTRAP.md
+agents/*/HEARTBEAT.md
+agents/*/IDENTITY.md
+agents/*/TOOLS.md
+agents/*/USER.md
+openclaw/.openclaw/
+openclaw/IDENTITY.md
+openclaw/TOOLS.md
+
+# Agent-built outputs (potato-shop was built by the master-manager agent as a test)
+potato-shop/
+
+# Build artifacts
+dist/
+build/
+.next/
+out/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Coverage
+coverage/
+.nyc_output/

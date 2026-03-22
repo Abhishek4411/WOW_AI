@@ -1,0 +1,97 @@
+# =============================================================================
+# NemoClaw Configuration — Security & Governance for WOW AI
+# =============================================================================
+# Reference: https://docs.nvidia.com/nemoclaw/latest/
+# Status: Alpha preview (March 2026). Expect breaking changes.
+# =============================================================================
+
+version: "1.0"
+name: "wow-ai-orchestrator"
+
+# --- Sandbox Configuration (OpenShell) ---
+sandbox:
+  runtime: "openshell"
+  isolation:
+    seccomp: true           # Restrict system calls
+    landlock: true          # Unprivileged access control
+    networkNamespace: true  # Dedicated network per agent
+  filesystem:
+    writable:
+      - "/sandbox"
+      - "/tmp"
+    readonly:
+      - "/usr"
+      - "/etc"
+      - "/opt"
+    blocked:
+      - "/root"
+      - "/home"
+      - "/var/run/docker.sock"
+  resources:
+    maxMemoryMB: 2048       # Per agent
+    maxCpuPercent: 25       # Per agent
+    maxDiskMB: 5120         # Per agent sandbox
+    maxProcesses: 50        # Per agent
+
+# --- Privacy Router Configuration ---
+privacy_router:
+  enabled: true
+  # All LLM calls from agents go to this local endpoint
+  localEndpoint: "https://inference.local"
+  # Credential injection — agents never see real keys
+  vaultedCredentials:
+    groq:
+      envVar: "GROQ_API_KEY"
+      tokenLifetimeMinutes: 60
+    gemini:
+      envVar: "GEMINI_API_KEY"
+      tokenLifetimeMinutes: 60
+    github:
+      envVar: "GITHUB_TOKEN"
+      tokenLifetimeMinutes: 120
+  # Model routing priorities
+  routing:
+    preferLocal: true
+    fallbackChain:
+      - provider: "ollama"
+        baseUrl: "http://host.docker.internal:11434"
+        priority: 1
+      - provider: "groq"
+        baseUrl: "https://api.groq.com/openai/v1"
+        priority: 2
+        rateLimitCooldownSeconds: 60
+      - provider: "gemini"
+        baseUrl: "https://generativelanguage.googleapis.com"
+        priority: 3
+        rateLimitCooldownSeconds: 120
+
+# --- Agent Lifecycle Management ---
+agents:
+  maxTotalAgents: 20
+  maxSpawnDepth: 3
+  maxConcurrentPerParent: 5
+  defaultTimeoutSeconds: 3600
+  healthCheckIntervalSeconds: 300
+  autoRestart:
+    enabled: true
+    maxRetries: 3
+    backoffMultiplier: 2
+
+# --- Audit Logging ---
+audit:
+  enabled: true
+  backend: "postgres"
+  connectionString: "${DATABASE_URL}"
+  logLevel: "info"          # debug | info | warn | error
+  retentionDays: 90
+  events:
+    - agentSpawned
+    - agentTerminated
+    - agentCrashed
+    - toolExecuted
+    - networkRequestBlocked
+    - hitlRequested
+    - hitlApproved
+    - hitlDenied
+    - policyViolation
+    - memoryAccess

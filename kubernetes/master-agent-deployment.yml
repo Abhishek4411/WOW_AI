@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: master-manager
+  namespace: wow-ai-agents
+  labels:
+    app: wow-ai
+    component: master-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wow-ai
+      component: master-manager
+  template:
+    metadata:
+      labels:
+        app: wow-ai
+        component: master-manager
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: master-manager
+          image: node:20-slim
+          command: ["sh", "-c"]
+          args:
+            - |
+              npm install -g openclaw &&
+              openclaw gateway start --config /config/openclaw.json
+          ports:
+            - containerPort: 3000
+              name: gateway
+            - containerPort: 8081
+              name: webchat
+          envFrom:
+            - secretRef:
+                name: wow-ai-secrets
+            - configMapRef:
+                name: wow-ai-config
+          volumeMounts:
+            - name: openclaw-config
+              mountPath: /config
+              readOnly: true
+            - name: agent-profiles
+              mountPath: /agents
+              readOnly: true
+            - name: sandbox
+              mountPath: /sandbox
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: openclaw-config
+          configMap:
+            name: openclaw-config
+        - name: agent-profiles
+          configMap:
+            name: agent-profiles
+        - name: sandbox
+          emptyDir:
+            sizeLimit: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: master-manager
+  namespace: wow-ai-agents
+spec:
+  selector:
+    app: wow-ai
+    component: master-manager
+  ports:
+    - name: gateway
+      port: 3000
+      targetPort: 3000
+    - name: webchat
+      port: 8081
+      targetPort: 8081
+  type: ClusterIP

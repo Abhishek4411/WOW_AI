@@ -1,0 +1,81 @@
+{
+  "$schema": "https://docs.openclaw.ai/schema/config.json",
+  "gateway": {
+    "port": 3000,
+    "mode": "local",
+    "auth": {
+      "mode": "token"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "dmPolicy": "pairing",
+      "groupPolicy": "open",
+      "streaming": "partial"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai/gpt-4.1-nano",
+        "fallbacks": [
+          "google/gemini-2.5-flash",
+          "groq/llama-3.3-70b-versatile"
+        ]
+      }
+    },
+    "list": [
+      {
+        "id": "main"
+      },
+      {
+        "id": "master-manager",
+        "name": "master-manager",
+        "model": "openai/gpt-4.1-mini"
+      },
+      {
+        "id": "architect",
+        "name": "architect",
+        "model": "openai/gpt-4.1-mini"
+      },
+      {
+        "id": "coder",
+        "name": "coder",
+        "model": "openai/gpt-4.1-mini"
+      },
+      {
+        "id": "devops",
+        "name": "devops",
+        "model": "openai/gpt-4.1-mini"
+      },
+      {
+        "id": "qa",
+        "name": "qa",
+        "model": "openai/gpt-4.1-mini"
+      },
+      {
+        "id": "researcher",
+        "name": "researcher",
+        "model": "openai/gpt-4.1-nano"
+      },
+      {
+        "id": "tool-maker",
+        "name": "tool-maker",
+        "model": "openai/gpt-4.1-mini"
+      }
+    ]
+  },
+  "acp": {
+    "defaultAgent": "coder"
+  },
+  "bindings": [
+    {
+      "type": "route",
+      "agentId": "master-manager",
+      "match": {
+        "channel": "telegram"
+      }
+    }
+  ]
+}

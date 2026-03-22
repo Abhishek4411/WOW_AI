@@ -1,0 +1,155 @@
+# =============================================================================
+# Network Policies — Kubernetes-level network isolation for agent pods
+# =============================================================================
+# Default: deny all traffic. Each component gets explicit allowlists.
+# =============================================================================
+
+# --- Default Deny All ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: wow-ai-agents
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# --- Allow DNS resolution for all pods ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: wow-ai-agents
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# --- Master Manager: can reach everything internal + external APIs ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: master-manager-policy
+  namespace: wow-ai-agents
+spec:
+  podSelector:
+    matchLabels:
+      component: master-manager
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: wow-ai
+      ports:
+        - port: 3000
+        - port: 8081
+  egress:
+    # Internal: PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              component: postgres
+      ports:
+        - port: 5432
+    # Internal: Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              component: redis
+      ports:
+        - port: 6379
+    # Internal: Ollama
+    - to:
+        - podSelector:
+            matchLabels:
+              component: ollama
+      ports:
+        - port: 11434
+    # External: Groq, Gemini, Telegram APIs (HTTPS)
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# --- PostgreSQL: only accepts connections from within namespace ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-policy
+  namespace: wow-ai-agents
+spec:
+  podSelector:
+    matchLabels:
+      component: postgres
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: wow-ai
+      ports:
+        - port: 5432
+  egress: []   # PostgreSQL doesn't need outbound access
+---
+# --- Redis: only accepts connections from within namespace ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-policy
+  namespace: wow-ai-agents
+spec:
+  podSelector:
+    matchLabels:
+      component: redis
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: wow-ai
+      ports:
+        - port: 6379
+  egress: []
+---
+# --- Ollama: accepts inference requests, can download models ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ollama-policy
+  namespace: wow-ai-agents
+spec:
+  podSelector:
+    matchLabels:
+      component: ollama
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: wow-ai
+      ports:
+        - port: 11434
+  egress:
+    # Ollama needs to download models from registry
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP

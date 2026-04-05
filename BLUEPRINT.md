@@ -320,7 +320,7 @@ AVAILABLE SPECIALIST AGENTS:
 
 ## 5. MODEL ROUTING STRATEGY
 
-**Current deployment (as of Session 8, 2026-03-22)**: ALL agents use `openai/gpt-4.1-mini` as primary with free cloud fallbacks.
+**Current deployment (as of Session 9, 2026-03-22)**: ALL agents use `openai/gpt-4.1-mini` as primary with free cloud fallbacks.
 
 | Agent / Task         | Primary Model            | Fallback 1              | Fallback 2              | Cost (primary)  |
 |----------------------|--------------------------|-------------------------|-------------------------|-----------------|
@@ -336,6 +336,22 @@ AVAILABLE SPECIALIST AGENTS:
 **Why gpt-4.1-mini for everything**: Past experience with gpt-4.1-nano produced poor quality output for complex tasks (code generation, system design, research). gpt-4.1-mini provides significantly better quality at $0.20/$0.80 per 1M tokens — still budget-friendly (~$0.05–0.15 per complete project build on a $10 budget).
 
 **Reserved for future**: `openai/gpt-4.1` ($2.00/$8.00 /1M) is registered in config for highly complex projects that demand maximum quality. Requires explicit opt-in due to cost.
+
+### Cost Optimization (Session 9)
+
+Background operations (heartbeat + compaction) are kept on `gpt-4.1-nano` to minimize idle spend:
+
+| Strategy | Setting | Savings |
+|---|---|---|
+| Heartbeat on nano | `heartbeat.model: "openai/gpt-4.1-nano"` | ~50% cheaper per heartbeat vs mini |
+| Hourly heartbeat | `heartbeat.every: "60m"` | Half the calls vs default 30min |
+| Light context heartbeat | `heartbeat.lightContext: true` | ~75% fewer input tokens per heartbeat |
+| Active hours only | `heartbeat.activeHours: 08:00–24:00 IST` | No burns while sleeping |
+| Compaction on nano | `compaction.model: "openai/gpt-4.1-nano"` | Simple summarization — nano handles it |
+| History cap | `compaction.maxHistoryShare: 0.4` | Caps history at 40% of context window |
+| Memory flush | `compaction.memoryFlush.enabled: true` | Saves notes before compaction |
+
+**Result**: Background ops ~$0.03–0.05/month (vs ~$0.60–1.00/month without optimization — 95% reduction). Project builds unchanged.
 
 ---
 
@@ -412,7 +428,7 @@ wow_ai/
 ├── .env.example                          # Environment variables template
 │
 ├── openclaw/                             # OpenClaw configuration
-│   ├── openclaw.json                     # Gateway configuration
+│   ├── openclaw.json                     # Reference gateway config (DO NOT copy to ~/.openclaw/)
 │   ├── SOUL.md                           # Master Manager identity
 │   ├── USER.md                           # Admin profile + DND rules
 │   ├── AGENTS.md                         # Sub-agent delegation rules
@@ -433,6 +449,13 @@ wow_ai/
 │   │   └── SOUL.md
 │   └── tool-maker/
 │       └── SOUL.md
+│
+├── try_out_demos/                        # Agent-built demo projects (output convention)
+│   ├── snakes_game/                      # Snakes & Ladders with Pygame (game pipeline)
+│   ├── chilika_lagoon_research/          # 7-chapter .docx research paper (research pipeline)
+│   ├── market_analysis/                  # Stock market analysis report (data pipeline)
+│   ├── tictactoe/                        # Tic-Tac-Toe .exe (first A2A proof-of-concept)
+│   └── {project-name}/                   # Any new project goes here
 │
 ├── nemoclaw/                             # NemoClaw security config
 │   ├── nemoclaw.config.yml               # Main NemoClaw configuration
@@ -476,8 +499,7 @@ wow_ai/
    Not production-ready. Track: https://github.com/NVIDIA/NemoClaw
 
 2. **Free API tiers have rate limits**. The system MUST implement intelligent
-   fallback: Groq → Gemini → Ollama (local). Never let a rate limit crash the
-   pipeline.
+   fallback: OpenAI → Gemini → Groq. Never let a rate limit crash the pipeline.
 
 3. **GPU memory is the bottleneck**. Running 70B models locally requires 48GB+
    VRAM. For consumer hardware (24GB), use 14B models and offload reasoning to
@@ -492,5 +514,92 @@ wow_ai/
    PostgreSQL + pgvector memory system is CRITICAL. Without it, agents enter
    infinite compaction loops and burn API credits.
 
-6. **Security is non-negotiable**. Never run agents without NemoClaw sandbox.
+6. **For-loop content generation is the #2 killer.** LLMs with ~8K output token limits
+   will generate 3 sentences and loop them under every heading when asked to produce
+   a long document in a single call. This produces fake, repetitive content.
+   **Use the chapter-by-chapter strategy**: spawn coder ONCE PER CHAPTER (500+ words each),
+   then compile all chapters into the final document. Never ask a single coder to write
+   an entire 15-page document in one call.
+
+7. **Sub-agents ignore SOUL.md** (OpenClaw bug #24852). Sub-agents spawned via
+   `sessions_spawn` only load AGENTS.md and TOOLS.md. All instructions (output path,
+   quality rules, self-sufficiency) MUST be embedded in the `task` parameter.
+
+8. **Gateway token mismatch** is automatically fixed by `scripts/start.sh`.
+   `scripts/sync-token.sh` runs on every startup and detects/fixes all variants:
+   placeholder token in runtime config, auth_token_mismatch, device_token_mismatch,
+   missing tokens. After the gateway starts, a tokenized dashboard URL is auto-generated
+   and opened in the browser — no manual login needed. Critical implementation detail:
+   `openclaw config get` reads env vars first and can return placeholder values — the
+   script reads `~/.openclaw/openclaw.json` directly via Node.js to get the true token.
+
+9. **Security is non-negotiable**. Never run agents without NemoClaw sandbox.
    A rogue agent with host access can destroy your system.
+
+---
+
+## 11. OPERATIONAL STRATEGIES (Learned from Production)
+
+These strategies were discovered through real usage and are critical for reliable operation.
+They are NOT obvious from the codebase alone — this section is the institutional memory.
+
+### 11.1 Forbidden Phrases Rule
+The master-manager agent naturally generates phrases like "Let me know if you want me to
+proceed" between pipeline steps. This pauses the entire pipeline and requires the user to
+respond. To eliminate this:
+- **7 banned question patterns** are listed in SOUL.md's FORBIDDEN PHRASES section
+- **Zero intermediate messages** — SOUL.md enforces ONE start message + ONE final report
+- **Rationale**: gpt-4.1-mini learned from conversational data where asking confirmation is
+  polite. The FORBIDDEN PHRASES override is a hard workaround for this training bias.
+
+### 11.2 Chapter-by-Chapter Writing Strategy
+**Problem**: LLMs have ~8K output token limits. Asking a single coder agent to write a
+15-page research document results in a Python script that stores 3 sentences in a dict
+and loops them under every heading — "for-loop laziness."
+
+**Solution**: Spawn the coder agent ONCE PER CHAPTER. Each call writes one chapter to
+`chapters/chapter_N.md` with minimum 500 words of unique content. A final compile coder
+reads all chapter files and assembles the `.docx` via `python-docx`. This completely
+bypasses the output token limit.
+
+### 11.3 Sequential Spawning with File Verification
+**Problem**: gpt-4.1-mini sometimes ignores "wait for completion" instructions and spawns
+researcher + coder simultaneously. The coder then fails because `RESEARCH_DATA.md` doesn't
+exist yet — a race condition.
+
+**Hard rule**: Spawn ONE agent → WAIT for its completion event → VERIFY its output file
+exists → THEN spawn the next. The verification step (using the `read` tool to check file
+existence) serves as a natural synchronization barrier.
+
+### 11.4 Shared Workspace Convention
+**Problem**: Each sub-agent runs in its own isolated workspace. Files written by the
+researcher are invisible to the coder unless both use the same absolute path.
+
+**Convention**: ALL agents read and write to:
+`C:\Users\Dancy Naik\Documents\VS_Code_Test\wow_ai\try_out_demos\{project-name}\`
+
+Every spawn task MUST include this path explicitly, including `mkdir -p` to create it.
+
+### 11.5 Self-Sufficiency Rules
+Sub-agents MUST never ask the user for anything. When spawning any agent, embed:
+- "Install missing packages yourself (`pip install`, `npm install`)"
+- "If you need information, use `web_search` and `web_fetch`"
+- "Debug errors yourself, retry up to 3 times"
+- "NEVER ask the user questions. NEVER say 'please provide'."
+
+### 11.6 Quality Gates Between Every Pipeline Step
+Between each pipeline step, the master-manager MUST verify the previous agent's output
+before spawning the next. Minimum checks:
+- File EXISTS at the expected absolute path
+- File size is above the minimum threshold (e.g., RESEARCH_DATA.md > 2000 words, .docx > 50KB)
+- No placeholder text present
+
+If verification fails → respawn the failed agent (max 3 retries). After 3 failures → HITL.
+
+### 11.7 Market Analysis / Data Tasks: Code-First Approach
+Complex financial reasoning exceeds gpt-4.1-mini's capabilities. For market analysis,
+stock data, or any data-heavy task:
+- **DO NOT** ask the agent to reason about markets
+- **DO** ask the agent to write Python code using `yfinance`, `pandas`, `matplotlib`
+- The code fetches real data, computes metrics, and generates reports — no reasoning needed
+- See `try_out_demos/market_analysis/step1_fetch_data.py` as a reference implementation

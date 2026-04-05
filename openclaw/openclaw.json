@@ -5,6 +5,16 @@
     "mode": "local",
     "auth": {
       "mode": "token"
+    },
+    "tools": {
+      "allow": ["sessions_spawn", "sessions_send"]
+    },
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": true
+        }
+      }
     }
   },
   "channels": {
@@ -23,6 +33,31 @@
           "google/gemini-2.5-flash",
           "groq/llama-3.3-70b-versatile"
         ]
+      },
+      "compaction": {
+        "mode": "safeguard",
+        "reserveTokensFloor": 20000,
+        "maxHistoryShare": 0.4,
+        "model": "openai/gpt-4.1-nano",
+        "identifierPolicy": "strict",
+        "recentTurnsPreserve": 3,
+        "memoryFlush": {
+          "enabled": true,
+          "softThresholdTokens": 4000
+        }
+      },
+      "heartbeat": {
+        "every": "60m",
+        "model": "openai/gpt-4.1-nano",
+        "lightContext": true,
+        "target": "none",
+        "ackMaxChars": 100,
+        "suppressToolErrorWarnings": true,
+        "activeHours": {
+          "start": "08:00",
+          "end": "24:00",
+          "timezone": "Asia/Kolkata"
+        }
       }
     },
     "list": [
@@ -32,7 +67,10 @@
       {
         "id": "master-manager",
         "name": "master-manager",
-        "model": "openai/gpt-4.1-mini"
+        "model": "openai/gpt-4.1-mini",
+        "subagents": {
+          "allowAgents": ["architect", "coder", "qa", "researcher", "devops", "tool-maker"]
+        }
       },
       {
         "id": "architect",
@@ -57,7 +95,7 @@
       {
         "id": "researcher",
         "name": "researcher",
-        "model": "openai/gpt-4.1-nano"
+        "model": "openai/gpt-4.1-mini"
       },
       {
         "id": "tool-maker",
@@ -67,7 +105,27 @@
     ]
   },
   "acp": {
-    "defaultAgent": "coder"
+    "enabled": true,
+    "dispatch": {
+      "enabled": true
+    },
+    "backend": "acpx",
+    "defaultAgent": "coder",
+    "allowedAgents": ["architect", "coder", "qa", "researcher", "devops", "tool-maker"],
+    "maxConcurrentSessions": 8
+  },
+  "plugins": {
+    "entries": {
+      "acpx": {
+        "enabled": true,
+        "config": {
+          "command": "node",
+          "strictWindowsCmdWrapper": false,
+          "permissionMode": "approve-all",
+          "timeoutSeconds": 300
+        }
+      }
+    }
   },
   "bindings": [
     {

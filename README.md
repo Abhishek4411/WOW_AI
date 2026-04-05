@@ -2,7 +2,7 @@
 
 An autonomous AI platform where a single **Master Manager** agent decomposes any software task and delegates it to a dynamically spawned army of specialist sub-agents. Agents communicate peer-to-peer, create more agents when needed, and operate 24/7 with minimal human intervention.
 
-Built on **OpenClaw v2026.3.13** for agent execution and **NVIDIA NemoClaw** for enterprise-grade sandboxing and security.
+Built on **OpenClaw v2026.3.13+** for agent execution and **NVIDIA NemoClaw** for enterprise-grade sandboxing and security.
 
 **GitHub**: [github.com/Abhishek4411/WOW_AI](https://github.com/Abhishek4411/WOW_AI)
 
@@ -140,9 +140,12 @@ wow_ai/
 │   ├── researcher/SOUL.md          # Web research specialist
 │   └── tool-maker/SOUL.md          # Custom MCP server builder
 │
-├── try_out_demos/                  # Agent-built demo projects
-│   ├── tictactoe/                  # Tic-Tac-Toe .exe (built autonomously)
-│   └── website/                    # E-commerce website (built autonomously)
+├── try_out_demos/                  # Agent-built demo projects (output convention)
+│   ├── snakes_game/                # Snakes & Ladders with Pygame + .exe (game pipeline)
+│   ├── chilika_lagoon_research/    # 7-chapter .docx research paper (research pipeline)
+│   ├── market_analysis/            # Stock market analysis report (data pipeline)
+│   ├── tictactoe/                  # Tic-Tac-Toe .exe (first A2A proof-of-concept)
+│   └── website/                    # E-commerce website (web pipeline)
 │
 ├── nemoclaw/                       # NVIDIA NemoClaw security config
 │   ├── nemoclaw.config.yml         # Sandbox, Privacy Router, audit
@@ -168,7 +171,8 @@ wow_ai/
     ├── install-models.sh           # Download Ollama models
     ├── install-prerequisites.sh    # Install Node, Docker, Ollama
     ├── validate.sh                 # 54-check validation suite
-    └── start.sh                    # Start the orchestrator
+    ├── sync-token.sh               # Auto-heal gateway token mismatches
+    └── start.sh                    # Start the orchestrator (runs sync-token + version check)
 ```
 
 ---
@@ -177,7 +181,7 @@ wow_ai/
 
 | Component          | Technology            | Purpose                         | Cost    |
 |--------------------|-----------------------|---------------------------------|---------|
-| Agent Runtime      | OpenClaw v2026.3.13   | Agent execution, channels, MCP  | Free    |
+| Agent Runtime      | OpenClaw v2026.3.13+  | Agent execution, channels, MCP  | Free    |
 | Sub-agent Spawning | ACPX Plugin           | sessions_spawn, subagent runtime| Free    |
 | Security           | NVIDIA NemoClaw       | Sandbox, policies, audit        | Free    |
 | Primary Inference  | OpenAI gpt-4.1-mini   | All agents (quality + budget)   | $0.20/1M tokens |
@@ -210,6 +214,24 @@ wow_ai/
 
 ---
 
+## Cost Optimization
+
+Token-saving strategies applied to minimize spend without sacrificing quality:
+
+| Strategy | Setting | Savings |
+|----------|---------|---------|
+| **Heartbeat on nano** | `heartbeat.model: "openai/gpt-4.1-nano"` | ~50% cheaper per heartbeat vs mini |
+| **Hourly heartbeat** | `heartbeat.every: "60m"` | Half the calls vs default 30min |
+| **Light context heartbeat** | `heartbeat.lightContext: true` | Only loads HEARTBEAT.md, not full agent context (~75% fewer input tokens) |
+| **Active hours only** | `heartbeat.activeHours: 08:00–24:00 IST` | No burns while sleeping (8 hours saved/day) |
+| **Compaction on nano** | `compaction.model: "openai/gpt-4.1-nano"` | Summarization is simple — nano handles it at half the cost |
+| **History cap** | `compaction.maxHistoryShare: 0.4` | Caps conversation history at 40% of context window |
+| **Memory flush** | `compaction.memoryFlush.enabled: true` | Auto-saves important notes before compaction (prevents re-asking) |
+
+**Result**: Background ops cost ~$0.03–0.05/month instead of ~$0.60–1.00/month (~95% reduction). Project builds unchanged.
+
+---
+
 ## Key Features
 
 - **Fully autonomous pipeline**: architect → coder → qa → fix → deliver, no human input between steps
@@ -235,7 +257,7 @@ wow_ai/
 
 ---
 
-## Known Issues & Workarounds (OpenClaw v2026.3.13)
+## Known Issues & Workarounds (OpenClaw v2026.3.13+)
 
 | Problem | Cause | Workaround |
 |---------|-------|------------|
@@ -243,6 +265,14 @@ wow_ai/
 | Sub-agents ignore SOUL.md | Bug #24852 | Embed all instructions in the `task` parameter |
 | ACPX exits with code 3 | .cmd wrapper crash on Windows | Set `command: "node"`, `strictWindowsCmdWrapper: false` |
 | "No permission to spawn sub-agents" | Missing config | Add `subagents.allowAgents` to master-manager in config |
+| Agents spawn in parallel → file not found | gpt-4.1-mini ignores "after X completes" | SOUL.md enforces hard sequential rule with file verification between steps |
+| Sub-agents can't see each other's files | Isolated workspaces per agent | Use absolute paths to shared `try_out_demos/{project}/` directory |
+| ResearchGate blocks web_fetch (403) | Bot IP blocked by Cloudflare | Skip ResearchGate; use MDPI, IEEE, Springer, Google Scholar instead |
+| .docx not generated (only .md files) | Coder not spawned or spawned too early | Pipeline enforces: researcher → verify → architect → verify → coder (python-docx) → verify → QA |
+| Master-manager asks "shall I proceed?" | gpt-4.1-mini ignores autonomy rules | SOUL.md now has FORBIDDEN PHRASES list — explicit ban on 7 common question patterns |
+| .docx has repeated text / for-loop content | gpt-4.1-mini output limit (~8K tokens) | Chapter-by-chapter strategy: spawn coder once per chapter (500+ words each), then compile into .docx |
+| `start.sh` exits after "Stopping gateway" | MSYS2 (Git Bash) converts `/c` arg to `C:/` path; `cmd.exe /c` never gets the flag → starts interactive mode → blocks script | **Fixed in start.sh**: all `cmd.exe /c` calls replaced with `powershell.exe` equivalents |
+| `pip install` permission error (Windows) | Global site-packages is write-protected | **Fixed in pipelines**: all Python agent tasks now create a `venv` first: `python -m venv venv && source venv/Scripts/activate` |
 
 ---
 
@@ -254,10 +284,12 @@ wow_ai/
 | Poor output quality from sub-agents    | Verify all agents use `openai/gpt-4.1-mini`, not nano |
 | Master-manager asks questions mid-task | SOUL.md autonomy rules not loaded. Re-sync `~/.openclaw/workspace-master-manager/SOUL.md` |
 | Gateway "No API key found"             | Add `OPENAI_API_KEY` to `~/.openclaw/gateway.cmd` (gateway doesn't inherit shell env) |
-| Gateway "token mismatch"               | Ensure `.env` `OPENCLAW_GATEWAY_TOKEN` matches `gateway.auth.token` in `~/.openclaw/openclaw.json` |
+| Gateway "token mismatch" (dashboard)   | **Automatic** — `start.sh` runs `sync-token.sh` on every startup and auto-opens the tokenized dashboard URL in your browser. If it still fails: press F5 once on the dashboard tab (token is embedded in URL). |
+| `start.sh` closes/exits after gateway stop step | MSYS2 bug: `cmd.exe /c` → `/c` converted to `C:/` → cmd starts interactive → blocks + breaks script. **Fixed**: replaced with `powershell.exe -Command "Stop-ScheduledTask ..."`. |
 | Ollama OOM / timeout on 8GB RAM        | Normal — OpenClaw enforces 16K min context. Cloud fallback handles it automatically. |
 | Files saved in wrong location          | Sub-agents ignore SOUL.md. Ensure the `task` parameter includes the full output path. |
 | OpenClaw command not found             | Run `npm install -g openclaw` |
+| How to upgrade OpenClaw safely         | `npm install -g openclaw@latest && openclaw doctor --fix && bash scripts/start.sh`. `start.sh` now warns you if an update is available on every run. |
 
 ---
 

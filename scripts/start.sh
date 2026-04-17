@@ -43,13 +43,31 @@ bash "$SCRIPT_DIR/sync-token.sh" && log_ok "Gateway tokens healthy" || \
 set -a; source .env; set +a
 
 # ─── 3. Start PostgreSQL ──────────────────────────────────────────────────────
+# Robust startup: handles "already running", "port in use", "container exists but stopped"
 log_info "Starting PostgreSQL..."
-docker compose up -d postgres 2>/dev/null
+
+# Check if port 5432 is already in use (any process, not just Docker)
+POSTGRES_ALREADY_UP=false
+if docker ps --format "{{.Names}}" 2>/dev/null | grep -q "wow-ai-postgres"; then
+    # Container is already running — just verify it's healthy
+    log_info "PostgreSQL container already running — verifying health..."
+    POSTGRES_ALREADY_UP=true
+elif docker ps -a --format "{{.Names}}" 2>/dev/null | grep -q "wow-ai-postgres"; then
+    # Container exists but is stopped — start it directly (faster than docker compose up)
+    log_info "PostgreSQL container exists but stopped — starting..."
+    docker start wow-ai-postgres 2>&1 | grep -v "^$" || true
+else
+    # Container doesn't exist at all — create it via docker compose
+    log_info "Creating PostgreSQL container..."
+    docker compose up -d postgres 2>&1 | grep -v "^$" | grep -v "healthy" || true
+fi
+
+# Wait for PostgreSQL to be ready (covers all three cases above)
 for i in {1..30}; do
-    docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" &>/dev/null \
-        && { log_ok "PostgreSQL is ready"; break; }
+    docker exec wow-ai-postgres pg_isready -U "${POSTGRES_USER:-wow_ai_admin}" -d "${POSTGRES_DB:-wow_ai}" &>/dev/null \
+        && { log_ok "PostgreSQL is ready"; POSTGRES_ALREADY_UP=true; break; }
     sleep 2
-    [ "$i" -eq 30 ] && { log_error "PostgreSQL failed to start"; exit 1; }
+    [ "$i" -eq 30 ] && { log_error "PostgreSQL failed to become ready after 60 seconds"; exit 1; }
 done
 
 # ─── 4. Check Redis ───────────────────────────────────────────────────────────
@@ -65,6 +83,19 @@ if ! curl -sf http://localhost:${OLLAMA_PORT:-11434}/api/tags &>/dev/null; then
         && log_ok "Ollama started" || log_warn "Ollama unavailable (cloud fallbacks will be used)"
 else
     log_ok "Ollama is running"
+fi
+
+# ─── 5b. Start Traccia Governance Proxy ───────────────────────────────────────
+# The proxy sits between OpenClaw and OpenAI, recording every agent LLM call
+# to the Traccia dashboard. OpenClaw's openai.baseUrl points to localhost:8001.
+# If proxy fails, OpenClaw falls back to direct OpenAI (governance disabled).
+if [ -n "${TRACCIA_API_KEY:-}" ] && [ "$TRACCIA_API_KEY" != "tr_dev_your_traccia_api_key_here" ]; then
+    log_info "Starting Traccia governance proxy on :8001..."
+    bash "$SCRIPT_DIR/start-traccia-proxy.sh" \
+        && log_ok "Traccia proxy ready — open traccia.ai/dashboard for real-time traces" \
+        || log_warn "Traccia proxy failed to start — agents will use direct OpenAI (no governance tracing)"
+else
+    log_warn "TRACCIA_API_KEY not set — skipping Traccia proxy (agents use direct OpenAI)"
 fi
 
 # ─── 6. Validate OpenClaw config ──────────────────────────────────────────────
@@ -149,6 +180,8 @@ echo "========================================"
 echo "  Gateway:    ws://127.0.0.1:$GATEWAY_PORT"
 echo "  PostgreSQL: localhost:${POSTGRES_PORT:-5432}"
 echo "  Telegram:   @ohboy441clawbot"
+echo "  Traccia:    http://localhost:8001/health (proxy)"
+echo "  Traces:     traccia.ai/dashboard"
 echo ""
 echo "  Dashboard opens automatically in ~10 seconds."
 echo "  Press Ctrl+C to stop the gateway."

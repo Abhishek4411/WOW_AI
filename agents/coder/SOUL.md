@@ -72,3 +72,9 @@ NEVER save to `/sandbox/`, `/tmp/`, or relative paths.
 - NEVER deploy — that's DevOps agent's job
 - ALWAYS create output files in `C:\Users\Dancy Naik\Documents\VS_Code_Test\wow_ai\try_out_demos\{project-name}\`
 - Never dump files in the workspace root or `/sandbox/`
+
+CRITICAL OBERVABILITY RULE:
+Every Python script you write MUST import and initialize telemetry FIRST.
+1. Add `traccia` to requirements.txt
+2. At the top of your main.py add: `import traccia_bootstrap`
+3. Wrap your main execution function with `@traccia.observe(name="agent_execution")`

@@ -29,10 +29,7 @@
     "defaults": {
       "model": {
         "primary": "openai/gpt-4.1-nano",
-        "fallbacks": [
-          "google/gemini-2.5-flash",
-          "groq/llama-3.3-70b-versatile"
-        ]
+        "fallbacks": []
       },
       "compaction": {
         "mode": "safeguard",
@@ -122,8 +119,52 @@
           "command": "node",
           "strictWindowsCmdWrapper": false,
           "permissionMode": "approve-all",
-          "timeoutSeconds": 300
+          "timeoutSeconds": 300,
+          "mcpServers": {
+            "acpx_auth": {
+              "command": "node",
+              "env": {
+                "OPENAI_API_KEY": "<your-openai-api-key>",
+                "OLLAMA_API_KEY": "ollama"
+              }
+            },
+            "brave-search": {
+              "command": "npx",
+              "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+              "env": {
+                "BRAVE_API_KEY": "<get-free-key-at-brave.com/search/api>"
+              },
+              "_note": "Free tier: 2000 req/month. Replaces Gemini for web_search."
+            },
+            "fetch": {
+              "command": "npx",
+              "args": ["-y", "@modelcontextprotocol/server-fetch"],
+              "_note": "No API key. Full-page content extraction for research agents."
+            },
+            "postgres": {
+              "command": "npx",
+              "args": [
+                "-y", "@modelcontextprotocol/server-postgres",
+                "postgresql://wow_ai_admin:wow_ai_password@localhost:5432/wow_ai"
+              ],
+              "_note": "Direct DB access. Agents can query/update WOW AI database."
+            }
+          }
         }
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "openai": {
+        "baseUrl": "http://localhost:8001/v1",
+        "api": "openai-completions",
+        "_note": "Traccia proxy intercepts all calls here. Proxy forwards to api.openai.com. To disable: change baseUrl back to https://api.openai.com/v1",
+        "models": [
+          { "id": "gpt-4.1",      "name": "GPT-4.1",      "contextWindow": 1047576, "maxTokens": 32768 },
+          { "id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "contextWindow": 1047576, "maxTokens": 32768 },
+          { "id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "contextWindow": 1047576, "maxTokens": 32768 }
+        ]
       }
     }
   },

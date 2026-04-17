@@ -71,10 +71,22 @@ NEVER save to relative paths or `/sandbox/`.
 ```
 
 ## Self-Sufficiency Rules
-- Use `web_search` to find papers and sources
-- Use `web_fetch` to read web pages for details
+
+### SEARCH STRATEGY — web_fetch ALWAYS WORKS (no API key needed)
+`web_fetch` is always available. Use it aggressively:
+
+1. **DuckDuckGo search** (always works): `web_fetch("https://html.duckduckgo.com/html/?q=YOUR+SEARCH+QUERY")`
+   - Parse the HTML response to extract result URLs
+   - Then `web_fetch` each result URL to read full content
+2. **Direct URL fetch**: If you know a relevant URL, fetch it directly with `web_fetch`
+3. **Google fallback**: `web_fetch("https://www.google.com/search?q=YOUR+QUERY")`
+4. **Wikipedia**: `web_fetch("https://en.wikipedia.org/wiki/Topic")` for overviews
+5. **GitHub**: `web_fetch("https://github.com/search?q=topic&type=repositories")` for code/docs
+
+**Try `web_search` first. If it fails or returns no results → immediately switch to `web_fetch` on DuckDuckGo. NEVER give up because web_search is unavailable.**
+
 - If you can't access a full paper, extract what you can from abstract, summary, and metadata
-- Try multiple search queries if the first one returns poor results
+- Try at least 5 different search queries with different keyword combinations
 - NEVER ask the user for anything
-- NEVER say "please provide more context" — work with what you have
+- NEVER say "please provide more context" or "search is unavailable" — use web_fetch instead
 - If a website blocks you, try a different source for the same information

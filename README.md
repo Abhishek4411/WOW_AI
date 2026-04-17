@@ -29,7 +29,9 @@ Built on **OpenClaw v2026.3.13+** for agent execution and **NVIDIA NemoClaw** fo
 
 **A2A delegation**: Master Manager → `sessions_spawn` (runtime: `subagent`) → specialist agents. Works end-to-end via Telegram bot `@ohboy441clawbot`.
 
-**Model resilience**: OpenAI (primary, gpt-4.1-mini) → Gemini 2.5 Flash (free fallback) → Groq Llama 3.3 70B (free fallback).
+**Model**: OpenAI gpt-4.1-mini exclusively for all agents. gpt-4.1-nano for heartbeat/compaction. No Gemini, no Groq.
+
+**Governance**: All LLM calls route through the Traccia proxy (`localhost:8001`) for real-time monitoring at [traccia.ai/dashboard](https://traccia.ai/dashboard).
 
 **Output convention**: All agent-built projects are saved to `try_out_demos/{project-name}/`.
 
@@ -52,10 +54,10 @@ Built on **OpenClaw v2026.3.13+** for agent execution and **NVIDIA NemoClaw** fo
 ```bash
 git clone https://github.com/Abhishek4411/WOW_AI.git wow_ai && cd wow_ai
 cp .env.example .env
-# Edit .env — add your API keys:
-#   OPENAI_API_KEY     → https://platform.openai.com/api-keys (primary, ~$0.20/1M tokens)
-#   GEMINI_API_KEY     → https://aistudio.google.com (FREE — fallback)
-#   GROQ_API_KEY       → https://console.groq.com (FREE — fallback)
+# Edit .env — add your keys:
+#   OPENAI_API_KEY     → https://platform.openai.com/api-keys  (all agents use this)
+#   BRAVE_API_KEY      → https://brave.com/search/api/  (free tier — for web_search)
+#   TRACCIA_API_KEY    → https://traccia.ai/dashboard  (free — real-time agent monitoring)
 #   TELEGRAM_BOT_TOKEN → Create via @BotFather on Telegram
 ```
 
@@ -101,7 +103,7 @@ cp openclaw/SOUL.md ~/.openclaw/agents/master-manager/agent/SOUL.md
 ./scripts/start.sh
 ```
 
-This starts PostgreSQL (Docker), checks Redis/Memurai, validates config, and launches the OpenClaw gateway with Telegram polling.
+This starts PostgreSQL (Docker), checks Redis/Memurai, starts the Traccia governance proxy (`:8001`), validates config, and launches the OpenClaw gateway with Telegram polling.
 
 ### 4. Talk to Your Agent
 
@@ -166,13 +168,19 @@ wow_ai/
 │   ├── network-policies.yml
 │   └── gpu-time-slicing-config.yml
 │
+├── governance/                     # Traccia governance proxy
+│   ├── proxy.py                    # FastAPI OpenAI-compatible proxy (:8001)
+│   ├── requirements.txt            # Python deps (traccia, fastapi, uvicorn, httpx)
+│   └── __init__.py
+│
 └── scripts/                        # Setup & utility scripts
     ├── setup.sh                    # One-click full setup
     ├── install-models.sh           # Download Ollama models
     ├── install-prerequisites.sh    # Install Node, Docker, Ollama
     ├── validate.sh                 # 54-check validation suite
     ├── sync-token.sh               # Auto-heal gateway token mismatches
-    └── start.sh                    # Start the orchestrator (runs sync-token + version check)
+    ├── start-traccia-proxy.sh      # Start governance proxy (auto-called by start.sh)
+    └── start.sh                    # Start the orchestrator (PostgreSQL + Traccia + gateway)
 ```
 
 ---
@@ -184,9 +192,10 @@ wow_ai/
 | Agent Runtime      | OpenClaw v2026.3.13+  | Agent execution, channels, MCP  | Free    |
 | Sub-agent Spawning | ACPX Plugin           | sessions_spawn, subagent runtime| Free    |
 | Security           | NVIDIA NemoClaw       | Sandbox, policies, audit        | Free    |
-| Primary Inference  | OpenAI gpt-4.1-mini   | All agents (quality + budget)   | $0.20/1M tokens |
-| Fallback 1         | Google Gemini 2.5 Flash| Free cloud fallback            | Free    |
-| Fallback 2         | Groq Llama 3.3 70B    | Free cloud fallback             | Free    |
+| Primary Inference  | OpenAI gpt-4.1-mini   | All 7 agents (only model used)  | ~$0.20/1M tokens |
+| Governance         | Traccia proxy         | Real-time traces, cost, policies| Free tier |
+| Web Search         | Brave Search MCP      | web_search for all agents       | Free (2000 req/mo) |
+| DB Access          | Postgres MCP          | Agents can query WOW AI database| Free    |
 | Local Inference    | Ollama                | Embeddings (nomic-embed-text)   | Free    |
 | Memory             | PostgreSQL + pgvector | Vectorized semantic memory      | Free    |
 | Cache              | Redis / Memurai       | Task queues, ephemeral state    | Free    |
@@ -208,9 +217,44 @@ wow_ai/
 | Researcher    | `openai/gpt-4.1-mini`   | Web research, documentation lookup      |
 | Tool Maker    | `openai/gpt-4.1-mini`   | Build custom MCP servers on demand      |
 
-**Fallback chain for all agents**: `openai/gpt-4.1-mini` → `google/gemini-2.5-flash` → `groq/llama-3.3-70b-versatile`
+**No fallbacks** — OpenAI is the only provider. Removing Gemini/Groq avoids the Gemini 503 web_search failures and keeps governance simple.
 
 > **Cost estimate**: gpt-4.1-mini at $0.20/$0.80 per 1M tokens. A typical project build (architect + coder + qa) costs ~$0.05–0.15. A $10 OpenAI credit covers 65–200 complete project builds.
+
+---
+
+## Real-Time Governance (Traccia)
+
+Every LLM call from every agent is intercepted by `governance/proxy.py` — a FastAPI server on `:8001` that acts as a local OpenAI-compatible endpoint.
+
+```
+Telegram → Master Manager → sessions_spawn → Coder / QA / Researcher / ...
+                                   │
+                         Each agent LLM call
+                                   │
+                                   ▼
+                    localhost:8001 (governance proxy)
+                        ├── Records trace to Traccia
+                        ├── Checks policies (token limits, costs, allowlist)
+                        └── Forwards to api.openai.com → response back
+```
+
+**What you see on [traccia.ai/dashboard](https://traccia.ai/dashboard)**:
+
+| Tab | What Shows |
+|-----|-----------|
+| Traces | Every agent call — agent name, model, tokens in/out, cost, latency, status |
+| Agents | All 7 agents with cumulative cost, error rate, avg latency |
+| Detected Patterns | Policy violations (e.g. agent exceeded 30K tokens, session over $0.50) |
+| Overview | Total spend, active agents, requests/min — live |
+
+**Policies enforced automatically**:
+- Hard block: single call > 30,000 tokens
+- Soft warn: session cost > $0.50
+- Hard block: unknown agent name (not in approved list)
+
+**The proxy starts automatically** with `./scripts/start.sh` when `TRACCIA_API_KEY` is set.
+Manual start: `bash scripts/start-traccia-proxy.sh`
 
 ---
 
@@ -253,7 +297,7 @@ Token-saving strategies applied to minimize spend without sacrificing quality:
 | Recommended   | 8 core | 16 GB | GTX 1650+ (4GB)       | Production       |
 | Cloud Free    | 4 ARM  | 24 GB | None                  | Oracle Cloud     |
 
-> **8GB RAM note**: Ollama OOMs when OpenClaw passes 16K context minimum. The system gracefully falls back to OpenAI/Gemini/Groq automatically.
+> **8GB RAM note**: Ollama OOMs when OpenClaw passes 16K context minimum. All agents fall back to OpenAI cloud inference automatically (no Ollama required for agent LLMs — only for embeddings).
 
 ---
 
@@ -267,6 +311,8 @@ Token-saving strategies applied to minimize spend without sacrificing quality:
 | "No permission to spawn sub-agents" | Missing config | Add `subagents.allowAgents` to master-manager in config |
 | Agents spawn in parallel → file not found | gpt-4.1-mini ignores "after X completes" | SOUL.md enforces hard sequential rule with file verification between steps |
 | Sub-agents can't see each other's files | Isolated workspaces per agent | Use absolute paths to shared `try_out_demos/{project}/` directory |
+| `400 Policy violation: estimated N tokens exceeds hard limit` | Traccia proxy `max_tokens_per_call` was 30K — too low for master-manager's SOUL.md (~34K chars) + history | **Fixed**: limit raised to 500K in `governance/proxy.py`. Normal agent calls will never hit it; only genuine runaway loops will. |
+| `web_search` fails with 503 | Gemini API was overloaded; Gemini removed entirely | **Fixed**: removed Gemini/Groq. Get a free Brave API key at brave.com/search/api — add to `.env` and `~/.openclaw/openclaw.json` mcpServers.brave-search.env.BRAVE_API_KEY |
 | ResearchGate blocks web_fetch (403) | Bot IP blocked by Cloudflare | Skip ResearchGate; use MDPI, IEEE, Springer, Google Scholar instead |
 | .docx not generated (only .md files) | Coder not spawned or spawned too early | Pipeline enforces: researcher → verify → architect → verify → coder (python-docx) → verify → QA |
 | Master-manager asks "shall I proceed?" | gpt-4.1-mini ignores autonomy rules | SOUL.md now has FORBIDDEN PHRASES list — explicit ban on 7 common question patterns |

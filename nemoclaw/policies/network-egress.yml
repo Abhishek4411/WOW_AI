@@ -12,12 +12,12 @@ defaultPolicy: "deny"
 agents:
   master-manager:
     egress:
-      - description: "Groq API for reasoning"
-        host: "api.groq.com"
+      - description: "OpenAI API for GPT-4.1-mini"
+        host: "api.openai.com"
         port: 443
         protocol: "https"
-      - description: "Gemini API for complex planning"
-        host: "generativelanguage.googleapis.com"
+      - description: "Traccia Telemetry API"
+        host: "api.traccia.ai"
         port: 443
         protocol: "https"
       - description: "Telegram Bot API"
@@ -40,6 +40,14 @@ agents:
   # --- Architect Agent ---
   architect:
     egress:
+      - description: "OpenAI API for GPT-4.1-mini"
+        host: "api.openai.com"
+        port: 443
+        protocol: "https"
+      - description: "Traccia Telemetry API"
+        host: "api.traccia.ai"
+        port: 443
+        protocol: "https"
       - description: "Local Ollama"
         host: "host.docker.internal"
         port: 11434
@@ -56,6 +64,14 @@ agents:
   # --- Coder Agent ---
   coder:
     egress:
+      - description: "OpenAI API for GPT-4.1-mini"
+        host: "api.openai.com"
+        port: 443
+        protocol: "https"
+      - description: "Traccia Telemetry API"
+        host: "api.traccia.ai"
+        port: 443
+        protocol: "https"
       - description: "Local Ollama"
         host: "host.docker.internal"
         port: 11434
@@ -76,6 +92,14 @@ agents:
   # --- DevOps Agent ---
   devops:
     egress:
+      - description: "OpenAI API for GPT-4.1-mini"
+        host: "api.openai.com"
+        port: 443
+        protocol: "https"
+      - description: "Traccia Telemetry API"
+        host: "api.traccia.ai"
+        port: 443
+        protocol: "https"
       - description: "Local Ollama"
         host: "host.docker.internal"
         port: 11434
@@ -96,6 +120,14 @@ agents:
   # --- QA Agent ---
   qa:
     egress:
+      - description: "OpenAI API for GPT-4.1-mini"
+        host: "api.openai.com"
+        port: 443
+        protocol: "https"
+      - description: "Traccia Telemetry API"
+        host: "api.traccia.ai"
+        port: 443
+        protocol: "https"
       - description: "Local Ollama"
         host: "host.docker.internal"
         port: 11434
@@ -108,6 +140,14 @@ agents:
   # --- Researcher Agent ---
   researcher:
     egress:
+      - description: "OpenAI API for GPT-4.1-mini"
+        host: "api.openai.com"
+        port: 443
+        protocol: "https"
+      - description: "Traccia Telemetry API"
+        host: "api.traccia.ai"
+        port: 443
+        protocol: "https"
       - description: "Local Ollama"
         host: "host.docker.internal"
         port: 11434
@@ -128,6 +168,14 @@ agents:
   # --- Tool Maker Agent ---
   tool-maker:
     egress:
+      - description: "OpenAI API for GPT-4.1-mini"
+        host: "api.openai.com"
+        port: 443
+        protocol: "https"
+      - description: "Traccia Telemetry API"
+        host: "api.traccia.ai"
+        port: 443
+        protocol: "https"
       - description: "Local Ollama"
         host: "host.docker.internal"
         port: 11434

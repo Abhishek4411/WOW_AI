@@ -28,6 +28,12 @@ ollama_data/
 # Sandbox directories (agent workspaces)
 /sandbox/
 
+# Traccia / Governance proxy runtime files
+governance/.venv/
+governance/.proxy.log
+governance/.proxy.pid
+governance/__pycache__/
+
 # OpenClaw auto-generated files in agent dirs (managed by CLI, not version-controlled)
 agents/*/.openclaw/
 agents/*/AGENTS.md

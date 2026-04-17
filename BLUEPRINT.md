@@ -3,12 +3,9 @@
 
 ---
 
-## 1. RECTIFIED SYSTEM PROMPT
+## 1. SYSTEM DESIGN
 
-The original request has been analyzed, debugged, and refined into a formal Architectural
-Request Definition. All ambiguities, typos, and contradictions have been resolved.
-
-### Optimized Master Orchestrator Prompt
+### Master Orchestrator Definition
 
 ```
 You are the MASTER MANAGER — a super-intelligent orchestrator operating within the
@@ -23,13 +20,12 @@ EXECUTION RULES:
 1. You NEVER write code directly. You delegate to specialist agents.
 2. Sub-agents communicate peer-to-peer via A2A (Agent-to-Agent) protocol.
 3. Sub-agents may spawn their own sub-agents (max depth: 3) to solve sub-problems.
-4. Use free local models (Ollama) for routine tasks, cloud APIs (Groq/Gemini) for
-   complex reasoning. Route via NemoClaw Privacy Router.
-5. Operate within Kubernetes. Each agent runs in an isolated pod.
+4. Use Ollama (local) for embeddings. Use OpenAI gpt-4.1-mini for all reasoning.
+5. All LLM calls route through the Traccia governance proxy on localhost:8001.
 6. Use MCP servers for all external tool access (K8s, GitHub, databases, browsers).
 7. Persist all memory to PostgreSQL + pgvector. Never rely on context window alone.
 8. Operate continuously 24/7 via HEARTBEAT.md loop.
-9. Communicate with human admin ONLY via Telegram/WhatsApp.
+9. Communicate with human admin ONLY via Telegram.
 10. Enforce Do Not Disturb (DND) — queue non-urgent updates during DND windows.
 11. Trigger Human-in-the-Loop (HITL) ONLY for: critical failures, security
     authorizations, production deployments, or financial decisions.
@@ -46,7 +42,7 @@ AVAILABLE SPECIALIST AGENTS:
 
 ---
 
-## 2. TECHNOLOGY STACK (Verified, All Free/Open-Source)
+## 2. TECHNOLOGY STACK
 
 | Layer              | Technology                          | Role                                    | License/Cost    |
 |--------------------|-------------------------------------|-----------------------------------------|-----------------|
@@ -55,17 +51,16 @@ AVAILABLE SPECIALIST AGENTS:
 | Security/Sandbox   | NVIDIA NemoClaw (alpha preview)     | OpenShell sandbox, policy enforcement   | Apache 2.0 (Free)|
 | Local Inference    | Ollama                              | Embeddings (nomic-embed-text)           | MIT (Free)      |
 | Primary Inference  | OpenAI gpt-4.1-mini                 | All 7 agents — best quality/cost ratio  | $0.20/$0.80 /1M |
-| Fallback Inference | Google Gemini 2.5 Flash (free tier) | Auto-fallback when OpenAI fails         | Free tier       |
-| Fallback Inference | Groq Llama 3.3 70B (free tier)      | Second fallback                         | Free tier       |
-| Orchestration      | Kubernetes (K3s for local)          | Container orchestration for agent pods  | Apache 2.0 (Free)|
+| Background Ops     | OpenAI gpt-4.1-nano                 | Heartbeat + compaction (cost savings)   | $0.10/$0.40 /1M |
+| Governance         | Traccia + `governance/proxy.py`     | Real-time LLM monitoring & policy       | Free (traccia.ai)|
+| Web Search         | Brave Search MCP + web_fetch        | Research tool for agents                | Free tier       |
 | Tool Protocol      | Model Context Protocol (MCP)        | Universal tool access standard          | Open standard   |
 | Persistent Memory  | PostgreSQL + pgvector               | Vectorized long-term agent memory       | PostgreSQL License|
 | Communication      | Telegram Bot API                    | Primary human-agent interface           | Free            |
-| Communication      | WhatsApp (via OpenClaw channel)     | Secondary human-agent interface         | Free            |
 | Database           | PostgreSQL                          | Application data persistence            | Free            |
-| Cache              | Redis                               | Ephemeral state, task queues            | BSD (Free)      |
+| Cache              | Redis (Memurai on Windows)          | Ephemeral state, task queues            | BSD (Free)      |
 | Container Runtime  | Docker / containerd                 | Agent container execution               | Apache 2.0 (Free)|
-| GUI                | Next.js + Tailwind CSS              | Web dashboard for monitoring agents     | MIT (Free)      |
+| GUI (planned)      | Next.js + Tailwind CSS              | Web dashboard for monitoring agents     | MIT (Free)      |
 | Version Control    | Git + GitHub                        | Code storage, PR management             | Free            |
 
 ---
@@ -91,12 +86,27 @@ AVAILABLE SPECIALIST AGENTS:
 ┌─────────────────────────────────────────────────────────────────┐
 │              NEMOCLAW GOVERNANCE LAYER                           │
 │  ┌──────────────┐ ┌──────────────┐ ┌────────────────────────┐  │
-│  │ OpenShell    │ │ Policy       │ │ Privacy Router         │  │
-│  │ Sandbox      │ │ Engine       │ │ (Model Selection +     │  │
-│  │ (seccomp,    │ │ (YAML-based  │ │  API Key Vaulting)     │  │
-│  │  Landlock,   │ │  permissions)│ │                        │  │
-│  │  namespaces) │ │              │ │ OpenAI → Gemini → Groq │  │
+│  │ OpenShell    │ │ Policy       │ │ Network Egress          │  │
+│  │ Sandbox      │ │ Engine       │ │ Policies (per-agent     │  │
+│  │ (seccomp,    │ │ (YAML-based  │ │ allowlists — default    │  │
+│  │  Landlock,   │ │  permissions)│ │ DENY ALL)              │  │
+│  │  namespaces) │ │              │ │                        │  │
 │  └──────────────┘ └──────────────┘ └────────────────────────┘  │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│           TRACCIA GOVERNANCE PROXY (port 8001)                   │
+│  governance/proxy.py — FastAPI OpenAI-compatible endpoint        │
+│                                                                  │
+│  Every OpenClaw LLM call → intercepted here → forwarded to      │
+│  api.openai.com. Structured LLM spans recorded to traccia.ai    │
+│  dashboard: agent names, token counts, cost, latency, policies. │
+│                                                                  │
+│  Policy enforcement:                                             │
+│  • max_tokens_per_call: 500,000 (hard block)                    │
+│  • max_session_cost_usd: $2.00 (soft warn)                      │
+│  • agent_allowlist: all 7 named agents (hard block on unknown)  │
 └─────────────────────────────┬───────────────────────────────────┘
                               │
                               ▼
@@ -134,12 +144,12 @@ AVAILABLE SPECIALIST AGENTS:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    MCP SERVER LAYER                              │
 │  ┌───────────┐ ┌───────────┐ ┌──────────┐ ┌────────────────┐  │
-│  │Kubernetes │ │ GitHub    │ │PostgreSQL│ │ Browser        │  │
-│  │MCP Server │ │ MCP Server│ │MCP Server│ │ MCP Server     │  │
+│  │Brave      │ │ Fetch     │ │PostgreSQL│ │ Kubernetes     │  │
+│  │Search MCP │ │ MCP Server│ │MCP Server│ │ MCP Server     │  │
 │  └───────────┘ └───────────┘ └──────────┘ └────────────────┘  │
 │  ┌───────────┐ ┌───────────┐ ┌──────────┐ ┌────────────────┐  │
-│  │Filesystem │ │ Docker    │ │ Redis    │ │ Custom (built  │  │
-│  │MCP Server │ │ MCP Server│ │MCP Server│ │ by Tool-Maker) │  │
+│  │ GitHub    │ │ Docker    │ │ Redis    │ │ Custom (built  │  │
+│  │ MCP Server│ │ MCP Server│ │MCP Server│ │ by Tool-Maker) │  │
 │  └───────────┘ └───────────┘ └──────────┘ └────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -155,7 +165,7 @@ AVAILABLE SPECIALIST AGENTS:
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│                    KUBERNETES CLUSTER                            │
+│                    KUBERNETES CLUSTER (Phase 8)                  │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │ Namespace: wow-ai-agents                                │    │
 │  │ • Master Manager Pod (always running)                   │    │
@@ -179,12 +189,9 @@ AVAILABLE SPECIALIST AGENTS:
 **Goal**: Set up local dev environment, install OpenClaw + NemoClaw, verify inference
 
 1. Install Docker, K3s (lightweight Kubernetes), Ollama
-2. Install OpenClaw: `npm install -g openclaw` (or via NemoClaw installer)
+2. Install OpenClaw: `npm install -g openclaw`
 3. Install NemoClaw: `curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash`
 4. Download local models via Ollama:
-   - `ollama pull qwen2.5-coder:14b` (coding tasks)
-   - `ollama pull llama3.3:70b` (reasoning, if hardware allows)
-   - `ollama pull nemotron:mini` (agentic tasks)
    - `ollama pull nomic-embed-text` (embeddings for memory)
 5. Configure OpenClaw gateway (`openclaw.json`)
 6. Set up PostgreSQL + pgvector via Docker Compose
@@ -193,14 +200,11 @@ AVAILABLE SPECIALIST AGENTS:
 ### Phase 2: Master Manager Agent (Week 2-3)
 **Goal**: Create the central orchestrator with task decomposition
 
-1. Write SOUL.md for Master Manager identity and rules
+1. Write SOUL.md for Master Manager identity and rules (keep under 20,000 chars — OpenClaw hard limit)
 2. Write AGENTS.md with sub-agent delegation instructions
-3. Configure model routing (Privacy Router):
-   - Local Ollama for sub-agents (free, no limits)
-   - Groq API for Master reasoning (free tier: ~30 req/min)
-   - Gemini API for complex planning (free tier: 15 req/min)
-4. Implement task decomposition logic via SOUL.md instructions
-5. Test: Give Master a simple task → verify it creates a plan
+3. Configure model: OpenAI gpt-4.1-mini for all agents
+4. Start Traccia governance proxy before OpenClaw gateway
+5. Test: Give Master a simple task → verify it creates a plan and delegates autonomously
 
 ### Phase 3: Specialist Agent Army (Week 3-4)
 **Goal**: Create and test each specialist agent profile
@@ -211,7 +215,7 @@ AVAILABLE SPECIALIST AGENTS:
    - `devops/SOUL.md` — infrastructure specialist
    - `qa/SOUL.md` — testing & security specialist
    - `researcher/SOUL.md` — web research specialist
-2. Register agents: `openclaw agents add --name coder --model qwen2.5-coder:14b`
+2. Register agents: `openclaw agents add --id <name> --name <name> --model "openai/gpt-4.1-mini"`
 3. Configure sub-agent spawning in Master's config:
    - `maxSpawnDepth: 3`
    - `maxConcurrent: 5`
@@ -221,21 +225,30 @@ AVAILABLE SPECIALIST AGENTS:
 ### Phase 4: MCP Server Integration (Week 4-5)
 **Goal**: Connect agents to external tools via MCP
 
-1. Configure MCPorter (`config/mcporter.json`) with:
-   - Kubernetes MCP Server (cluster management)
-   - GitHub MCP Server (repo management, PRs)
-   - PostgreSQL MCP Server (database operations)
-   - Browser MCP Server (web automation)
-   - Filesystem MCP Server (sandboxed file access)
+1. Configure MCP servers in `openclaw.json` under `plugins.entries.acpx.config.mcpServers`:
+   - Brave Search MCP (`@modelcontextprotocol/server-brave-search`)
+   - Fetch MCP (`@modelcontextprotocol/server-fetch`)
+   - PostgreSQL MCP (`@modelcontextprotocol/server-postgres`)
+   - Kubernetes MCP (cluster management)
+   - GitHub MCP (repo management, PRs)
 2. Test each MCP server independently
-3. Grant specific MCP access per agent via NemoClaw policies:
-   - Coder → Filesystem + GitHub
-   - DevOps → Kubernetes + Docker
-   - Architect → PostgreSQL + GitHub
-   - QA → GitHub + Filesystem
-   - Researcher → Browser only
+3. Grant specific MCP access per agent via NemoClaw policies
 
-### Phase 5: Persistent Memory System (Week 5-6)
+### Phase 5: Traccia Governance Integration (Complete)
+**Goal**: Real-time monitoring of all agent LLM calls
+
+1. `governance/proxy.py` — FastAPI server on :8001, OpenAI-compatible endpoint
+2. `governance/requirements.txt` — traccia, fastapi, uvicorn, httpx, python-dotenv
+3. `scripts/start-traccia-proxy.sh` — auto-install venv, start proxy, health-check
+4. `scripts/start.sh` — starts proxy before OpenClaw gateway
+5. OpenClaw's `openai.baseUrl` set to `http://localhost:8001/v1` in `~/.openclaw/openclaw.json`
+6. Dashboard at [traccia.ai/dashboard](https://traccia.ai/dashboard) shows:
+   - Per-agent token counts and USD cost
+   - Latency per call
+   - Policy violations (unknown agents, token overflows)
+   - Full call timeline: master-manager → researcher → coder → qa
+
+### Phase 6: Persistent Memory System (Week 5-6)
 **Goal**: Replace Markdown memory with PostgreSQL + pgvector
 
 1. Deploy PostgreSQL with pgvector extension
@@ -244,102 +257,70 @@ AVAILABLE SPECIALIST AGENTS:
 4. Implement semantic memory search for cross-agent knowledge sharing
 5. Test: Agent recalls decisions made by other agents days prior
 
-### Phase 6: Communication & HITL (Week 6-7)
-**Goal**: Telegram/WhatsApp integration with DND protocol
+### Phase 7: Communication & HITL (Week 6-7)
+**Goal**: Telegram integration with DND protocol
 
 1. Create Telegram bot via @BotFather
 2. Add bot token to `openclaw.json` channels config
 3. Bind Master Manager to Telegram: `openclaw agents bind --agent master --bind telegram`
-4. Implement DND logic in USER.md:
-   - Define DND schedules
-   - Queue non-urgent notifications
-   - Allow override for critical alerts only
-5. Implement HITL approval flow:
-   - Agent requests permission → Master pauses → Telegram alert → User approves/denies
-6. (Optional) Configure WhatsApp as secondary channel
+4. Implement DND logic in USER.md
+5. Implement HITL approval flow
 
-### Phase 7: 24/7 Continuous Operation (Week 7-8)
+### Phase 8: 24/7 Continuous Operation (Week 7-8)
 **Goal**: Implement heartbeat loop and self-healing
 
-1. Write HEARTBEAT.md with scheduled routines:
-   - Every 5 min: Check sub-agent health
-   - Every 15 min: Commit uncommitted code
-   - Every 1 hour: Summarize progress to memory
-   - Every 6 hours: Run full system diagnostics
-   - On failure: Auto-respawn failed agents (max 3 retries)
+1. Write HEARTBEAT.md with scheduled routines
 2. Set up system cron for heartbeat trigger
 3. Implement auto-recovery: detect crashed agents, parse logs, respawn
-4. Test: Kill an agent manually → verify auto-recovery
+4. Heartbeat uses gpt-4.1-nano (cost-optimized)
 
-### Phase 8: Kubernetes Production Deployment (Week 8-10)
+### Phase 9: Kubernetes Production Deployment (Week 8-10)
 **Goal**: Move from Docker Compose to full K8s deployment
 
 1. Create K8s namespace: `wow-ai-agents`
-2. Deploy all components as K8s resources:
-   - Master Manager: Deployment (always-on, 1 replica)
-   - Specialist agents: Jobs/Deployments (ephemeral)
-   - PostgreSQL: StatefulSet with PVC
-   - Redis: Deployment
-   - Ollama: Deployment with GPU affinity
+2. Deploy all components as K8s resources
 3. Apply network policies (strict egress/ingress per agent)
 4. Configure GPU time-slicing if GPU available
-5. Set up Ingress for web GUI
 
-### Phase 9: Web GUI Dashboard (Week 10-12)
+### Phase 10: Web GUI Dashboard (Week 10-12)
 **Goal**: Build monitoring and interaction interface
 
 1. Scaffold Next.js app with Tailwind CSS
-2. Implement pages:
-   - `/dashboard` — Live agent status, task progress
-   - `/agents` — Agent list, health, logs
-   - `/tasks` — Task queue, history, results
-   - `/chat` — Direct chat with Master Manager
-   - `/settings` — DND config, API keys, model routing
-   - `/preview` — Live preview of generated applications
+2. Pages: `/dashboard`, `/agents`, `/tasks`, `/chat`, `/settings`, `/preview`
 3. Connect to PostgreSQL for real-time data
 4. WebSocket for live agent status updates
 
-### Phase 10: Self-Evolving Loop (Week 12+)
+### Phase 11: Self-Evolving Loop (Week 12+)
 **Goal**: Agents that create new agents and tools on demand
 
 1. Implement Tool-Maker agent profile
-2. When a specialist lacks a tool:
-   - Specialist → A2A → Master → Spawn Tool-Maker
-   - Tool-Maker builds custom MCP server
-   - Tool-Maker registers new MCP with MCPorter
-   - Original specialist now has the new tool
-3. Implement agent template system:
-   - Master can create new SOUL.md files for new specialties
-   - Register with OpenClaw dynamically
-4. Implement learning loop:
-   - After each completed project, extract patterns
-   - Store as vector embeddings in pgvector
-   - Future projects benefit from past solutions
+2. When specialist lacks a tool → spawn Tool-Maker → build custom MCP server
+3. Implement agent template system: Master can create new SOUL.md files dynamically
+4. Implement learning loop: extract patterns → store as pgvector embeddings
 
 ---
 
 ## 5. MODEL ROUTING STRATEGY
 
-**Current deployment (as of Session 9, 2026-03-22)**: ALL agents use `openai/gpt-4.1-mini` as primary with free cloud fallbacks.
+**Current deployment**: ALL agents use `openai/gpt-4.1-mini`. No fallbacks.
 
-| Agent / Task         | Primary Model            | Fallback 1              | Fallback 2              | Cost (primary)  |
-|----------------------|--------------------------|-------------------------|-------------------------|-----------------|
-| master-manager       | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
-| architect            | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
-| coder                | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
-| devops               | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
-| qa                   | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
-| researcher           | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
-| tool-maker           | openai/gpt-4.1-mini     | google/gemini-2.5-flash | groq/llama-3.3-70b      | $0.20/$0.80 /1M |
-| Embeddings           | nomic-embed-text (Ollama)| —                       | —                       | Free (local)    |
+| Agent / Task         | Model                    | Notes                            | Cost            |
+|----------------------|--------------------------|----------------------------------|-----------------|
+| master-manager       | openai/gpt-4.1-mini     | Orchestrator                     | $0.20/$0.80 /1M |
+| architect            | openai/gpt-4.1-mini     | System design                    | $0.20/$0.80 /1M |
+| coder                | openai/gpt-4.1-mini     | Code generation                  | $0.20/$0.80 /1M |
+| devops               | openai/gpt-4.1-mini     | Infrastructure                   | $0.20/$0.80 /1M |
+| qa                   | openai/gpt-4.1-mini     | Testing & review                 | $0.20/$0.80 /1M |
+| researcher           | openai/gpt-4.1-mini     | Web research                     | $0.20/$0.80 /1M |
+| tool-maker           | openai/gpt-4.1-mini     | MCP server builder               | $0.20/$0.80 /1M |
+| Heartbeat/Compaction | openai/gpt-4.1-nano     | Background ops (cost-optimized)  | $0.10/$0.40 /1M |
+| Embeddings           | nomic-embed-text (Ollama)| Semantic memory                  | Free (local)    |
 
-**Why gpt-4.1-mini for everything**: Past experience with gpt-4.1-nano produced poor quality output for complex tasks (code generation, system design, research). gpt-4.1-mini provides significantly better quality at $0.20/$0.80 per 1M tokens — still budget-friendly (~$0.05–0.15 per complete project build on a $10 budget).
+**Why gpt-4.1-mini for everything**: Past experience with gpt-4.1-nano produced poor quality output for complex tasks (code generation, system design, research). gpt-4.1-mini provides significantly better quality at $0.20/$0.80 per 1M tokens.
 
-**Reserved for future**: `openai/gpt-4.1` ($2.00/$8.00 /1M) is registered in config for highly complex projects that demand maximum quality. Requires explicit opt-in due to cost.
+**Why no fallbacks**: Gemini/Groq fallbacks were removed because `web_search` was powered by Gemini's Google Search grounding — removing the key broke search silently. All search is now handled via `web_fetch` + DuckDuckGo HTML strategy which requires no API key.
 
-### Cost Optimization (Session 9)
-
-Background operations (heartbeat + compaction) are kept on `gpt-4.1-nano` to minimize idle spend:
+### Cost Optimization
 
 | Strategy | Setting | Savings |
 |---|---|---|
@@ -349,9 +330,8 @@ Background operations (heartbeat + compaction) are kept on `gpt-4.1-nano` to min
 | Active hours only | `heartbeat.activeHours: 08:00–24:00 IST` | No burns while sleeping |
 | Compaction on nano | `compaction.model: "openai/gpt-4.1-nano"` | Simple summarization — nano handles it |
 | History cap | `compaction.maxHistoryShare: 0.4` | Caps history at 40% of context window |
-| Memory flush | `compaction.memoryFlush.enabled: true` | Saves notes before compaction |
 
-**Result**: Background ops ~$0.03–0.05/month (vs ~$0.60–1.00/month without optimization — 95% reduction). Project builds unchanged.
+**Result**: Background ops ~$0.03–0.05/month. Project builds ~$0.05–0.15 each.
 
 ---
 
@@ -365,35 +345,39 @@ Background operations (heartbeat + compaction) are kept on `gpt-4.1-nano` to min
    - Dedicated network namespaces per agent
    - Agents can only write to `/sandbox` and `/tmp`
 
-2. **Network Policies** (Kubernetes + NemoClaw)
+2. **Network Policies** (`nemoclaw/policies/network-egress.yml`)
    - Default: deny all egress/ingress
-   - Allowlist per agent type (see Phase 4)
-   - No agent can access host network
-   - Privacy Router intercepts all LLM API calls
+   - Per-agent allowlists: only explicitly listed hosts are reachable
+   - Researcher has broad HTTP/S access but `noFilesystemWrite: true`, `noDatabaseAccess: true`
+   - All agents can reach: `api.openai.com`, `api.traccia.ai`, `host.docker.internal:11434`
 
-3. **Credential Vaulting**
-   - API keys stored in Kubernetes Secrets
-   - Privacy Router injects keys at gateway level
+3. **Traccia Governance Proxy** (`governance/proxy.py`)
+   - All LLM calls intercepted before reaching OpenAI
+   - Policy hard-blocks: unknown agents, token overflow
+   - Every call logged to traccia.ai with agent name, tokens, cost
+
+4. **Credential Vaulting**
+   - API keys in `.env` (never committed to git)
+   - Proxy reads `OPENAI_API_KEY` from environment at runtime
    - Sub-agents NEVER see actual credentials
-   - Time-limited tokens for external services
 
-4. **HITL Security Gates**
+5. **HITL Security Gates**
    - Production deployments require human approval
    - Financial operations require human approval
    - New external API integrations require human approval
-   - NemoClaw policy changes require human approval
 
 ---
 
-## 7. FREE API KEYS NEEDED
+## 7. API KEYS NEEDED
 
-| Service        | Get Key At                              | Free Tier Limits              |
-|----------------|----------------------------------------|-------------------------------|
-| Groq           | console.groq.com                       | ~30 req/min, daily cap        |
-| Google Gemini  | aistudio.google.com                    | 15 req/min, 1M tokens/day    |
-| Telegram Bot   | t.me/BotFather                         | Unlimited                     |
-| GitHub         | github.com/settings/tokens             | 5000 req/hour                 |
-| Ollama         | ollama.com (local install)             | Unlimited (local)             |
+| Service        | Get Key At                              | Required?          | Notes                         |
+|----------------|----------------------------------------|--------------------|-------------------------------|
+| OpenAI         | platform.openai.com/api-keys           | **Required**       | All 7 agents use this         |
+| Traccia        | traccia.ai/dashboard → Settings        | **Required**       | Real-time governance dashboard|
+| Telegram Bot   | t.me/BotFather                         | **Required**       | Human-agent interface         |
+| Brave Search   | brave.com/search/api                   | Recommended        | Free tier — enables web_search|
+| GitHub         | github.com/settings/tokens             | Optional           | For GitHub MCP server         |
+| Ollama         | ollama.com (local install)             | Required (local)   | Unlimited (local)             |
 
 ---
 
@@ -403,14 +387,15 @@ Background operations (heartbeat + compaction) are kept on `gpt-4.1-nano` to min
 - CPU: 8 cores
 - RAM: 16 GB (32 GB recommended)
 - Storage: 100 GB SSD
-- GPU: Optional (CPU inference works, just slower)
+- GPU: Optional (OpenAI cloud inference — no local GPU needed for core functionality)
+- Network: Stable internet (all LLM calls go to api.openai.com via proxy)
 
 ### Recommended (Production)
 - CPU: 16+ cores
 - RAM: 64 GB
 - Storage: 500 GB NVMe SSD
-- GPU: NVIDIA RTX 3090/4090 (24GB VRAM) or better
-- Network: Stable internet for Groq/Gemini fallback
+- GPU: NVIDIA RTX 3090/4090 (24GB VRAM) — for local Ollama models
+- Network: Stable internet for OpenAI API
 
 ### Cloud Alternative (Free Tier)
 - Oracle Cloud: 4 ARM cores, 24GB RAM (Always Free)
@@ -424,71 +409,52 @@ Background operations (heartbeat + compaction) are kept on `gpt-4.1-nano` to min
 ```
 wow_ai/
 ├── BLUEPRINT.md                          # This document
+├── README.md                             # Quick-start guide
 ├── docker-compose.yml                    # Local development stack
 ├── .env.example                          # Environment variables template
 │
 ├── openclaw/                             # OpenClaw configuration
-│   ├── openclaw.json                     # Reference gateway config (DO NOT copy to ~/.openclaw/)
-│   ├── SOUL.md                           # Master Manager identity
+│   ├── openclaw.json                     # Reference gateway config (commit-safe)
+│   ├── SOUL.md                           # Master Manager identity (≤20,000 chars)
 │   ├── USER.md                           # Admin profile + DND rules
 │   ├── AGENTS.md                         # Sub-agent delegation rules
-│   ├── HEARTBEAT.md                      # 24/7 continuous operation loop
-│   └── config/
-│       └── mcporter.json                 # MCP server configuration
+│   └── HEARTBEAT.md                      # 24/7 continuous operation loop
 │
 ├── agents/                               # Specialist agent profiles
-│   ├── architect/
-│   │   └── SOUL.md
-│   ├── coder/
-│   │   └── SOUL.md
-│   ├── devops/
-│   │   └── SOUL.md
-│   ├── qa/
-│   │   └── SOUL.md
-│   ├── researcher/
-│   │   └── SOUL.md
-│   └── tool-maker/
-│       └── SOUL.md
+│   ├── architect/SOUL.md
+│   ├── coder/SOUL.md
+│   ├── devops/SOUL.md
+│   ├── qa/SOUL.md
+│   ├── researcher/SOUL.md                # Includes web_fetch DuckDuckGo strategy
+│   └── tool-maker/SOUL.md
 │
-├── try_out_demos/                        # Agent-built demo projects (output convention)
-│   ├── snakes_game/                      # Snakes & Ladders with Pygame (game pipeline)
-│   ├── chilika_lagoon_research/          # 7-chapter .docx research paper (research pipeline)
-│   ├── market_analysis/                  # Stock market analysis report (data pipeline)
-│   ├── tictactoe/                        # Tic-Tac-Toe .exe (first A2A proof-of-concept)
-│   └── {project-name}/                   # Any new project goes here
+├── governance/                           # Traccia governance proxy
+│   ├── proxy.py                          # FastAPI OpenAI-compatible proxy on :8001
+│   ├── requirements.txt                  # traccia, fastapi, uvicorn, httpx
+│   └── __init__.py
 │
 ├── nemoclaw/                             # NemoClaw security config
 │   ├── nemoclaw.config.yml               # Main NemoClaw configuration
 │   └── policies/
-│       ├── network-egress.yml            # Network allowlists per agent
+│       ├── network-egress.yml            # Network allowlists per agent (default: DENY)
 │       ├── agent-permissions.yml         # Agent capability restrictions
 │       └── hitl-rules.yml                # Human-in-the-loop triggers
-│
-├── mcp-servers/                          # MCP server configurations
-│   ├── kubernetes-mcp.json
-│   ├── github-mcp.json
-│   ├── postgres-mcp.json
-│   └── browser-mcp.json
 │
 ├── memory/                               # Database initialization
 │   └── init.sql                          # PostgreSQL + pgvector schema
 │
-├── kubernetes/                           # K8s deployment manifests
+├── kubernetes/                           # K8s deployment manifests (Phase 9)
 │   ├── namespace.yml
 │   ├── master-agent-deployment.yml
 │   ├── postgres-statefulset.yml
-│   ├── redis-deployment.yml
-│   ├── ollama-deployment.yml
-│   ├── network-policies.yml
-│   └── gpu-time-slicing-config.yml
+│   └── network-policies.yml
 │
-├── gui/                                  # Next.js web dashboard
-│   └── (scaffolded in Phase 9)
+├── gui/                                  # Next.js web dashboard (Phase 10)
 │
 └── scripts/                              # Setup and utility scripts
-    ├── setup.sh                          # One-click full setup
-    ├── install-models.sh                 # Download Ollama models
-    └── start.sh                          # Start the orchestrator
+    ├── start.sh                          # Start full stack (proxy + docker + openclaw)
+    ├── start-traccia-proxy.sh            # Start governance proxy on :8001
+    └── install-models.sh                 # Download Ollama models
 ```
 
 ---
@@ -498,12 +464,13 @@ wow_ai/
 1. **NemoClaw is in ALPHA** (released March 16, 2026). Expect breaking changes.
    Not production-ready. Track: https://github.com/NVIDIA/NemoClaw
 
-2. **Free API tiers have rate limits**. The system MUST implement intelligent
-   fallback: OpenAI → Gemini → Groq. Never let a rate limit crash the pipeline.
+2. **OpenClaw SOUL.md has a 20,000-character hard limit.** Content beyond 20K is silently
+   truncated without any error. If Spawning Rules, Communication Rules, or Self-Sufficiency
+   sections fall beyond 20K, the master-manager will ask questions instead of delegating
+   autonomously. Always verify `wc -c openclaw/SOUL.md` stays under 20,000.
 
-3. **GPU memory is the bottleneck**. Running 70B models locally requires 48GB+
-   VRAM. For consumer hardware (24GB), use 14B models and offload reasoning to
-   Groq/Gemini cloud APIs.
+3. **GPU memory is the bottleneck** for local Ollama inference. For consumer hardware (24GB),
+   use 14B models. Core functionality (all 7 agents) uses OpenAI cloud — no GPU needed.
 
 4. **Infinite agent spawning is dangerous**. Always enforce:
    - `maxSpawnDepth: 3` (not infinite)
@@ -514,92 +481,89 @@ wow_ai/
    PostgreSQL + pgvector memory system is CRITICAL. Without it, agents enter
    infinite compaction loops and burn API credits.
 
-6. **For-loop content generation is the #2 killer.** LLMs with ~8K output token limits
+6. **For-loop content generation** is the #2 killer. LLMs with ~8K output token limits
    will generate 3 sentences and loop them under every heading when asked to produce
-   a long document in a single call. This produces fake, repetitive content.
-   **Use the chapter-by-chapter strategy**: spawn coder ONCE PER CHAPTER (500+ words each),
-   then compile all chapters into the final document. Never ask a single coder to write
-   an entire 15-page document in one call.
+   a long document in a single call.
+   **Solution**: Spawn coder ONCE PER CHAPTER (500+ words each), then compile.
 
 7. **Sub-agents ignore SOUL.md** (OpenClaw bug #24852). Sub-agents spawned via
    `sessions_spawn` only load AGENTS.md and TOOLS.md. All instructions (output path,
    quality rules, self-sufficiency) MUST be embedded in the `task` parameter.
 
 8. **Gateway token mismatch** is automatically fixed by `scripts/start.sh`.
-   `scripts/sync-token.sh` runs on every startup and detects/fixes all variants:
-   placeholder token in runtime config, auth_token_mismatch, device_token_mismatch,
-   missing tokens. After the gateway starts, a tokenized dashboard URL is auto-generated
-   and opened in the browser — no manual login needed. Critical implementation detail:
-   `openclaw config get` reads env vars first and can return placeholder values — the
-   script reads `~/.openclaw/openclaw.json` directly via Node.js to get the true token.
+   Reads `~/.openclaw/openclaw.json` directly via Node.js to get the true token.
 
-9. **Security is non-negotiable**. Never run agents without NemoClaw sandbox.
-   A rogue agent with host access can destroy your system.
+9. **Traccia proxy must start before OpenClaw gateway.** OpenClaw reads `baseUrl` at
+   startup. If the proxy is not running when gateway starts, all LLM calls fail.
+   `start.sh` handles this ordering automatically.
+
+10. **Security is non-negotiable**. Never run agents without NemoClaw sandbox.
+    A rogue agent with host access can destroy your system.
 
 ---
 
 ## 11. OPERATIONAL STRATEGIES (Learned from Production)
 
 These strategies were discovered through real usage and are critical for reliable operation.
-They are NOT obvious from the codebase alone — this section is the institutional memory.
 
 ### 11.1 Forbidden Phrases Rule
-The master-manager agent naturally generates phrases like "Let me know if you want me to
-proceed" between pipeline steps. This pauses the entire pipeline and requires the user to
-respond. To eliminate this:
-- **7 banned question patterns** are listed in SOUL.md's FORBIDDEN PHRASES section
-- **Zero intermediate messages** — SOUL.md enforces ONE start message + ONE final report
-- **Rationale**: gpt-4.1-mini learned from conversational data where asking confirmation is
-  polite. The FORBIDDEN PHRASES override is a hard workaround for this training bias.
+The master-manager naturally generates phrases like "Let me know if you want me to proceed"
+between pipeline steps. This pauses the entire pipeline. To eliminate this:
+- 7 banned question patterns are listed in SOUL.md's FORBIDDEN PHRASES section
+- Zero intermediate messages: SOUL.md enforces ONE start message + ONE final report
+- Rationale: gpt-4.1-mini learned from conversational data where confirmation is polite.
+  The FORBIDDEN PHRASES override is a hard workaround for this training bias.
 
 ### 11.2 Chapter-by-Chapter Writing Strategy
-**Problem**: LLMs have ~8K output token limits. Asking a single coder agent to write a
-15-page research document results in a Python script that stores 3 sentences in a dict
-and loops them under every heading — "for-loop laziness."
+**Problem**: LLMs have ~8K output token limits. Asking a single coder to write a 15-page
+research document results in 3 sentences looped under every heading — "for-loop laziness."
 
-**Solution**: Spawn the coder agent ONCE PER CHAPTER. Each call writes one chapter to
-`chapters/chapter_N.md` with minimum 500 words of unique content. A final compile coder
-reads all chapter files and assembles the `.docx` via `python-docx`. This completely
-bypasses the output token limit.
+**Solution**: Spawn the coder ONCE PER CHAPTER. Each call writes one chapter to
+`chapters/chapter_N.md` with minimum 500 words. A final compile coder reads all chapter
+files and assembles the `.docx` via `python-docx`.
 
 ### 11.3 Sequential Spawning with File Verification
-**Problem**: gpt-4.1-mini sometimes ignores "wait for completion" instructions and spawns
-researcher + coder simultaneously. The coder then fails because `RESEARCH_DATA.md` doesn't
-exist yet — a race condition.
+**Problem**: gpt-4.1-mini sometimes spawns researcher + coder simultaneously. The coder
+fails because `RESEARCH_DATA.md` doesn't exist yet — a race condition.
 
-**Hard rule**: Spawn ONE agent → WAIT for its completion event → VERIFY its output file
-exists → THEN spawn the next. The verification step (using the `read` tool to check file
-existence) serves as a natural synchronization barrier.
+**Hard rule**: Spawn ONE agent → WAIT for completion → VERIFY output file exists →
+THEN spawn the next. File verification is the synchronization barrier.
 
 ### 11.4 Shared Workspace Convention
-**Problem**: Each sub-agent runs in its own isolated workspace. Files written by the
-researcher are invisible to the coder unless both use the same absolute path.
+Each sub-agent runs in its own isolated workspace. Files written by researcher are invisible
+to coder unless both use the same absolute path.
 
-**Convention**: ALL agents read and write to:
+**Convention**: ALL agents read/write to:
 `C:\Users\Dancy Naik\Documents\VS_Code_Test\wow_ai\try_out_demos\{project-name}\`
 
-Every spawn task MUST include this path explicitly, including `mkdir -p` to create it.
+Every spawn task MUST include this path and `mkdir -p` to create it.
 
 ### 11.5 Self-Sufficiency Rules
-Sub-agents MUST never ask the user for anything. When spawning any agent, embed:
+Sub-agents MUST never ask the user for anything. Always embed in spawn task:
 - "Install missing packages yourself (`pip install`, `npm install`)"
-- "If you need information, use `web_search` and `web_fetch`"
+- "If you need information, use `web_fetch` on DuckDuckGo: `web_fetch('https://html.duckduckgo.com/html/?q=YOUR+QUERY')`"
 - "Debug errors yourself, retry up to 3 times"
 - "NEVER ask the user questions. NEVER say 'please provide'."
 
-### 11.6 Quality Gates Between Every Pipeline Step
-Between each pipeline step, the master-manager MUST verify the previous agent's output
-before spawning the next. Minimum checks:
+### 11.6 Web Search Without API Key
+`web_search` requires a Brave API key. When unavailable, use `web_fetch` directly:
+```
+DuckDuckGo: web_fetch("https://html.duckduckgo.com/html/?q=YOUR+SEARCH+QUERY")
+Wikipedia:  web_fetch("https://en.wikipedia.org/wiki/Topic")
+GitHub:     web_fetch("https://github.com/search?q=topic&type=repositories")
+```
+This strategy is embedded in SOUL.md and researcher/SOUL.md.
+
+### 11.7 Quality Gates Between Every Pipeline Step
+Between each pipeline step, master-manager MUST verify the previous agent's output:
 - File EXISTS at the expected absolute path
-- File size is above the minimum threshold (e.g., RESEARCH_DATA.md > 2000 words, .docx > 50KB)
+- File size is above minimum threshold (RESEARCH_DATA.md > 2000 words, .docx > 50KB)
 - No placeholder text present
 
-If verification fails → respawn the failed agent (max 3 retries). After 3 failures → HITL.
+If verification fails → respawn (max 3 retries) → after 3 failures → HITL.
 
-### 11.7 Market Analysis / Data Tasks: Code-First Approach
-Complex financial reasoning exceeds gpt-4.1-mini's capabilities. For market analysis,
-stock data, or any data-heavy task:
+### 11.8 Market Analysis / Data Tasks: Code-First Approach
+Complex financial reasoning exceeds gpt-4.1-mini's capabilities. For market analysis:
 - **DO NOT** ask the agent to reason about markets
 - **DO** ask the agent to write Python code using `yfinance`, `pandas`, `matplotlib`
-- The code fetches real data, computes metrics, and generates reports — no reasoning needed
-- See `try_out_demos/market_analysis/step1_fetch_data.py` as a reference implementation
+- The code fetches real data and generates reports — no reasoning needed

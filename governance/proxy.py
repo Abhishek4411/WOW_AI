@@ -2,25 +2,37 @@
 WOW AI × Traccia — OpenAI API Proxy
 =====================================
 Sits between OpenClaw (Node.js) and OpenAI API.
-Intercepts every agent LLM call and records real-time traces to Traccia.
+Intercepts every agent LLM call and records real-time traces + costs to Traccia.
 
 Architecture:
   OpenClaw → http://localhost:8001/v1 → THIS PROXY → https://api.openai.com/v1
                                               ↕
-                                        api.traccia.ai  (real-time traces)
+                                        api.traccia.ai  (real-time traces + costs)
+
+Why we call the metrics recorder directly:
+  Traccia's auto-patcher (patch_openai) only wraps the SYNC openai client.
+  Our proxy uses httpx (async), which the patcher never sees. So patcher-based
+  cost recording was silently skipped → $0 in the Costs tab.
+
+  Fix: after each response, call recorder.record_cost() / record_token_usage()
+  directly. These are the same methods the patcher calls internally, bypassing the
+  broken gpt-4.1-mini pricing gap (Traccia's built-in table only covers gpt-4/gpt-4o).
+  We compute cost ourselves using real OpenAI pricing constants.
+
+  runtime_config.run_identity(agent_name=...) tags all metrics with the calling
+  agent so the Costs tab breaks down spend by agent correctly.
 
 Start:
   cd <project_root>
   python -m uvicorn governance.proxy:app --host 0.0.0.0 --port 8001
 
-OpenClaw config change needed (in ~/.openclaw/openclaw.json):
+OpenClaw config (in ~/.openclaw/openclaw.json):
   "openai": { "baseUrl": "http://localhost:8001/v1", ... }
 """
 
 import json
 import os
 import time
-import asyncio
 from typing import AsyncGenerator
 
 import httpx
@@ -36,12 +48,13 @@ load_dotenv()
 TRACCIA_API_KEY = os.getenv("TRACCIA_API_KEY", "")
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 
-COST_PER_1M_INPUT  = 0.20   # gpt-4.1-mini input
-COST_PER_1M_OUTPUT = 0.80   # gpt-4.1-mini output
+# gpt-4.1-mini pricing (per 1M tokens)
+COST_PER_1M_INPUT  = 0.40   # $0.40 input (cached: $0.10)
+COST_PER_1M_OUTPUT = 1.60   # $1.60 output
 
-# ── Traccia init ──────────────────────────────────────────────────────────────
-# auto_start_trace=False: each agent call creates its own trace, not a shared root.
-# A shared root caused "governance.proxy" to appear as a spurious agent in the dashboard.
+# ── Traccia init ───────────────────────────────────────────────────────────────
+# auto_start_trace=False: each agent call creates its own trace.
+# A shared root trace named "governance.proxy" appeared as a spurious agent.
 if TRACCIA_API_KEY:
     traccia.init(
         api_key=TRACCIA_API_KEY,
@@ -75,7 +88,6 @@ def extract_agent_name(messages: list[dict]) -> str:
         if msg.get("role") == "system":
             content = msg.get("content", "")
             if isinstance(content, list):
-                # Content can be a list of dicts for vision requests
                 content = " ".join(
                     part.get("text", "") for part in content if isinstance(part, dict)
                 )
@@ -85,17 +97,59 @@ def extract_agent_name(messages: list[dict]) -> str:
                     return agent_name
     return "unknown-agent"
 
-def estimate_cost(input_tokens: int, output_tokens: int) -> float:
+def compute_cost(input_tokens: int, output_tokens: int) -> float:
     return (input_tokens / 1_000_000 * COST_PER_1M_INPUT +
             output_tokens / 1_000_000 * COST_PER_1M_OUTPUT)
 
-# ── Policy enforcement ────────────────────────────────────────────────────────
-# gpt-4.1-mini supports 1M input tokens ($0.40/1M). Master-manager SOUL.md alone
-# is ~34K chars. Limit set to 500K tokens (~$0.20 max per call) — blocks runaway
-# loops, not normal agent operation.
+# ── Traccia cost + token recording ────────────────────────────────────────────
+def _push_metrics(
+    agent_name: str, model: str,
+    input_tokens: int, output_tokens: int,
+    cost_usd: float, latency_s: float,
+) -> None:
+    """
+    Push token usage, cost, and latency to Traccia's metrics backend.
+
+    We call the metrics recorder directly instead of relying on patch_openai():
+      - patch_openai() only wraps the sync openai client; our httpx proxy bypasses it.
+      - Traccia's built-in pricing table lacks gpt-4.1-mini (only has gpt-4/gpt-4o),
+        so _compute_cost() would return None even if the patcher fired.
+
+    runtime_config.run_identity() tags metrics with the agent name so the Costs tab
+    shows per-agent spend (master-manager, coder, researcher, etc.).
+    """
+    if not TRACCIA_API_KEY:
+        return
+    try:
+        from traccia.metrics.recorder import get_metrics_recorder
+        recorder = get_metrics_recorder()
+        if not recorder:
+            return
+
+        attrs = {
+            "gen_ai.system":       "openai",
+            "gen_ai.request.model": model,
+            "agent.name":          agent_name,
+            "agent.id":            agent_name,
+            "environment":         "production",
+        }
+
+        with runtime_config.run_identity(agent_id=agent_name, agent_name=agent_name):
+            recorder.record_token_usage(
+                prompt_tokens=input_tokens,
+                completion_tokens=output_tokens,
+                attributes=attrs,
+            )
+            recorder.record_cost(cost_usd, attributes=attrs)
+            recorder.record_duration(latency_s, attributes=attrs)
+
+    except Exception as e:
+        print(f"[Traccia] Metrics push warning: {e}")
+
+# ── Policy enforcement ─────────────────────────────────────────────────────────
 POLICIES = {
-    "max_tokens_per_call":  500_000,  # hard-block above this (gpt-4.1-mini limit is 1M)
-    "max_session_cost_usd": 2.00,     # soft-warn above this
+    "max_tokens_per_call":  500_000,
+    "max_session_cost_usd": 2.00,
     "agent_allowlist": [
         "master-manager", "architect", "coder", "qa",
         "researcher", "devops", "tool-maker", "unknown-agent",
@@ -103,41 +157,24 @@ POLICIES = {
 }
 
 def check_policies(agent_name: str, estimated_input_tokens: int) -> tuple[bool, str]:
-    """
-    Returns (allowed: bool, reason: str).
-    Logs policy checks to Traccia via guardrail_span if available.
-    """
     global _session_cost_usd
 
-    # Policy 1: token limit
     if estimated_input_tokens > POLICIES["max_tokens_per_call"]:
         reason = (f"Agent '{agent_name}' estimated {estimated_input_tokens} tokens "
                   f"- exceeds hard limit of {POLICIES['max_tokens_per_call']}")
-        print(f"[Traccia Policy] HARD BLOCK - {reason}")
+        print(f"[Policy] HARD BLOCK - {reason}")
         try:
             from traccia.guardrails import guardrail_span
-            from traccia.guardrails.schema import (
-                GuardrailFinding, EnforcementMode, GuardrailCategory, Confidence, SourceType
-            )
             with guardrail_span("token-limit-policy", category="token_limit",
                                 enforcement_mode="block", policy_id="wow-token-policy-001"):
-                GuardrailFinding(
-                    category=GuardrailCategory.SAFETY,
-                    name="token-limit-policy",
-                    source_type=SourceType.CUSTOM,
-                    confidence=Confidence.HIGH,
-                    triggered=True,
-                    enforcement_mode=EnforcementMode.BLOCK,
-                    detection_reason=reason,
-                )
+                pass
         except Exception:
             pass
         return False, reason
 
-    # Policy 2: session cost (soft warn — don't block)
     if _session_cost_usd > POLICIES["max_session_cost_usd"]:
-        print(f"[Traccia Policy] SOFT WARN - session cost ${_session_cost_usd:.4f} "
-              f"exceeds ${POLICIES['max_session_cost_usd']} threshold")
+        print(f"[Policy] SOFT WARN - session cost ${_session_cost_usd:.4f} "
+              f"exceeds ${POLICIES['max_session_cost_usd']}")
         try:
             from traccia.guardrails import guardrail_span
             with guardrail_span("cost-limit-policy", category="cost_limit",
@@ -146,22 +183,21 @@ def check_policies(agent_name: str, estimated_input_tokens: int) -> tuple[bool, 
         except Exception:
             pass
 
-    # Policy 3: agent allowlist
     if agent_name not in POLICIES["agent_allowlist"]:
         reason = f"Agent '{agent_name}' is not in the approved allowlist"
-        print(f"[Traccia Policy] HARD BLOCK - {reason}")
+        print(f"[Policy] HARD BLOCK - {reason}")
         return False, reason
 
     return True, "ok"
 
-# ── FastAPI app ───────────────────────────────────────────────────────────────
-app = FastAPI(title="WOW AI × Traccia Proxy", version="1.0.0")
+# ── FastAPI app ────────────────────────────────────────────────────────────────
+app = FastAPI(title="WOW AI × Traccia Proxy", version="2.1.0")
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "traccia": bool(TRACCIA_API_KEY), "proxy_target": OPENAI_BASE_URL}
 
-# ── Models passthrough (OpenClaw calls /v1/models on startup) ─────────────────
+# ── Models passthrough (OpenClaw calls /v1/models on startup) ──────────────────
 @app.get("/v1/models")
 async def list_models(request: Request):
     auth = request.headers.get("authorization", "")
@@ -172,25 +208,21 @@ async def list_models(request: Request):
         )
         return JSONResponse(content=resp.json(), status_code=resp.status_code)
 
-# ── Main proxy endpoint ───────────────────────────────────────────────────────
+# ── Main proxy endpoint ────────────────────────────────────────────────────────
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     global _session_cost_usd
 
-    body = await request.json()
-    auth = request.headers.get("authorization", "")
-    model = body.get("model", "gpt-4.1-mini")
+    body     = await request.json()
+    auth     = request.headers.get("authorization", "")
+    model    = body.get("model", "gpt-4.1-mini")
     messages = body.get("messages", [])
     is_streaming = body.get("stream", False)
 
     agent_name = extract_agent_name(messages)
 
-    # Estimate token count for policy check.
-    # GPT tokenizer averages ~4 chars/token for code, ~3 chars/token for prose.
-    # Using //3 gives a conservative (slightly high) estimate without being punitive.
-    all_text = " ".join(
-        str(m.get("content", "")) for m in messages
-    )
+    # Conservative token estimate for policy check (//3 ≈ prose chars-per-token)
+    all_text = " ".join(str(m.get("content", "")) for m in messages)
     estimated_tokens = max(len(all_text) // 3, 1)
 
     allowed, policy_reason = check_policies(agent_name, estimated_tokens)
@@ -200,7 +232,7 @@ async def chat_completions(request: Request):
             content={"error": {"message": f"Policy violation: {policy_reason}", "type": "policy_block"}},
         )
 
-    # Inject stream_options to get usage in streaming responses
+    # Inject stream_options so OpenAI includes usage in the final streaming chunk
     if is_streaming:
         body = {**body, "stream_options": {"include_usage": True}}
 
@@ -223,25 +255,32 @@ async def _non_stream_with_trace(
 ) -> JSONResponse:
     global _session_cost_usd
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            f"{OPENAI_BASE_URL}/chat/completions",
-            json=body,
-            headers={"Authorization": auth, "Content-Type": "application/json"},
-        )
+    # @traccia.observe creates the TRACE span (shows in Traces tab with agent name).
+    # _push_metrics() records cost/tokens to the METRICS backend (shows in Costs tab).
+    @traccia.observe(name=agent_name)
+    async def _call():
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                f"{OPENAI_BASE_URL}/chat/completions",
+                json=body,
+                headers={"Authorization": auth, "Content-Type": "application/json"},
+            )
+            return resp
 
+    resp = await _call()
     elapsed = time.perf_counter() - t0
+
     data = resp.json()
     usage = data.get("usage", {})
-    input_tokens  = usage.get("prompt_tokens", estimated_tokens := max(len(str(body)) // 4, 1))
+    input_tokens  = usage.get("prompt_tokens",     max(len(str(body)) // 3, 1))
     output_tokens = usage.get("completion_tokens", 0)
-    cost = estimate_cost(input_tokens, output_tokens)
+    cost = compute_cost(input_tokens, output_tokens)
     _session_cost_usd += cost
 
     print(f"[Proxy] {agent_name} done | {elapsed:.2f}s | "
           f"in={input_tokens} out={output_tokens} | ${cost:.5f} (session: ${_session_cost_usd:.5f})")
 
-    _record_trace(agent_name, model, input_tokens, output_tokens, cost, elapsed, error=None)
+    _push_metrics(agent_name, model, input_tokens, output_tokens, cost, elapsed)
 
     return JSONResponse(content=data, status_code=resp.status_code)
 
@@ -255,6 +294,13 @@ async def _stream_with_trace(
     output_tokens = 0
     error_msg     = None
 
+    # Wrap the stream setup in @traccia.observe so the Traces tab shows the agent name.
+    # The generator itself runs outside the span (streaming continues after setup returns),
+    # but instrument_openai picks up trace context from the parent span.
+    @traccia.observe(name=agent_name)
+    async def _open_stream():
+        return httpx.AsyncClient(timeout=120)
+
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream(
@@ -263,9 +309,14 @@ async def _stream_with_trace(
                 json=body,
                 headers={"Authorization": auth, "Content-Type": "application/json"},
             ) as resp:
+                # Create a named trace span for this streaming call
+                @traccia.observe(name=agent_name)
+                async def _mark_start():
+                    pass
+                await _mark_start()
+
                 async for raw_chunk in resp.aiter_bytes():
                     yield raw_chunk
-                    # Parse SSE chunks to extract usage from the final chunk
                     try:
                         text = raw_chunk.decode("utf-8", errors="ignore")
                         for line in text.splitlines():
@@ -275,10 +326,9 @@ async def _stream_with_trace(
                             if payload == "[DONE]":
                                 continue
                             chunk_data = json.loads(payload)
-                            # OpenAI sends usage in the last chunk when stream_options.include_usage=true
                             if "usage" in chunk_data and chunk_data["usage"]:
                                 u = chunk_data["usage"]
-                                input_tokens  = u.get("prompt_tokens", 0)
+                                input_tokens  = u.get("prompt_tokens",     0)
                                 output_tokens = u.get("completion_tokens", 0)
                     except Exception:
                         pass
@@ -289,66 +339,26 @@ async def _stream_with_trace(
 
     elapsed = time.perf_counter() - t0
     if input_tokens == 0:
-        # Fallback estimate if usage wasn't in stream
-        input_tokens = max(len(str(body)) // 4, 1)
-        output_tokens = 100  # rough fallback
+        input_tokens  = max(len(str(body)) // 3, 1)
+        output_tokens = 100
 
-    cost = estimate_cost(input_tokens, output_tokens)
+    cost = compute_cost(input_tokens, output_tokens)
     _session_cost_usd += cost
 
     print(f"[Proxy] {agent_name} stream done | {elapsed:.2f}s | "
           f"in={input_tokens} out={output_tokens} | ${cost:.5f} (session: ${_session_cost_usd:.5f})")
 
-    _record_trace(agent_name, model, input_tokens, output_tokens, cost, elapsed, error=error_msg)
+    _push_metrics(agent_name, model, input_tokens, output_tokens, cost, elapsed)
 
 
-def _record_trace(
-    agent_name: str, model: str,
-    input_tokens: int, output_tokens: int,
-    cost_usd: float, latency_s: float,
-    error: str | None,
-) -> None:
-    """Send a structured LLM span to Traccia so tokens/cost/latency show in dashboard."""
-    if not TRACCIA_API_KEY:
-        return
-    try:
-        # Pass token counts as structured attributes so Traccia renders them correctly.
-        # Standard OTel/GenAI semantic conventions for LLM spans:
-        span_attrs = {
-            "gen_ai.system":                  "openai",
-            "gen_ai.request.model":           model,
-            "gen_ai.usage.input_tokens":      input_tokens,
-            "gen_ai.usage.output_tokens":     input_tokens + output_tokens,  # total
-            "gen_ai.usage.prompt_tokens":     input_tokens,
-            "gen_ai.usage.completion_tokens": output_tokens,
-            "llm.usage.cost_usd":             round(cost_usd, 6),
-            "llm.latency_s":                  round(latency_s, 3),
-            "wow_ai.agent":                   agent_name,
-        }
-        if error:
-            span_attrs["error.message"] = error
-
-        @traccia.observe(name=agent_name, as_type="llm", attributes=span_attrs)
-        def _send() -> str:
-            return (
-                f"agent={agent_name} model={model} "
-                f"in={input_tokens} out={output_tokens} "
-                f"cost_usd={cost_usd:.6f} latency_s={latency_s:.3f}"
-                + (f" error={error}" if error else "")
-            )
-
-        _send()
-    except Exception as e:
-        print(f"[Traccia] Trace record warning: {e}")
-
-
-# ── Startup / shutdown ────────────────────────────────────────────────────────
+# ── Startup / shutdown ─────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def on_startup():
-    print("[Proxy] WOW AI x Traccia proxy listening on :8001")
+    print("[Proxy] WOW AI x Traccia proxy v2.1 listening on :8001")
     print(f"[Proxy] Forwarding to : {OPENAI_BASE_URL}")
     if TRACCIA_API_KEY:
         print("[Proxy] Traccia enabled - open traccia.ai/dashboard")
+        print("[Proxy] Cost recording: direct metrics recorder (bypasses pricing table gap)")
     else:
         print("[Proxy] Traccia DISABLED - set TRACCIA_API_KEY in .env")
 

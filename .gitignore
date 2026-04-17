@@ -64,3 +64,7 @@ venv/
 # Coverage
 coverage/
 .nyc_output/
+
+# Internal session notes and demo outputs (not part of the codebase)
+PROJECT_NOTES.md
+try_out_demos/

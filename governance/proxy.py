@@ -144,7 +144,7 @@ def _push_metrics(
             recorder.record_duration(latency_s, attributes=attrs)
 
     except Exception as e:
-        print(f"[Traccia] Metrics push warning: {e}")
+        print(f"[Traccia] Metrics push FAILED: {type(e).__name__}: {e}")
 
 # ── Policy enforcement ─────────────────────────────────────────────────────────
 POLICIES = {
@@ -294,13 +294,6 @@ async def _stream_with_trace(
     output_tokens = 0
     error_msg     = None
 
-    # Wrap the stream setup in @traccia.observe so the Traces tab shows the agent name.
-    # The generator itself runs outside the span (streaming continues after setup returns),
-    # but instrument_openai picks up trace context from the parent span.
-    @traccia.observe(name=agent_name)
-    async def _open_stream():
-        return httpx.AsyncClient(timeout=120)
-
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream(
@@ -309,12 +302,6 @@ async def _stream_with_trace(
                 json=body,
                 headers={"Authorization": auth, "Content-Type": "application/json"},
             ) as resp:
-                # Create a named trace span for this streaming call
-                @traccia.observe(name=agent_name)
-                async def _mark_start():
-                    pass
-                await _mark_start()
-
                 async for raw_chunk in resp.aiter_bytes():
                     yield raw_chunk
                     try:
@@ -358,7 +345,16 @@ async def on_startup():
     print(f"[Proxy] Forwarding to : {OPENAI_BASE_URL}")
     if TRACCIA_API_KEY:
         print("[Proxy] Traccia enabled - open traccia.ai/dashboard")
-        print("[Proxy] Cost recording: direct metrics recorder (bypasses pricing table gap)")
+        # Verify metrics recorder is available at boot so failures are visible in logs
+        try:
+            from traccia.metrics.recorder import get_metrics_recorder
+            recorder = get_metrics_recorder()
+            if recorder:
+                print("[Proxy] Metrics recorder: READY — cost will appear in Traccia Costs tab")
+            else:
+                print("[Proxy] Metrics recorder: NOT READY — cost may not appear (check TRACCIA_API_KEY)")
+        except Exception as e:
+            print(f"[Proxy] Metrics recorder check failed: {e}")
     else:
         print("[Proxy] Traccia DISABLED - set TRACCIA_API_KEY in .env")
 

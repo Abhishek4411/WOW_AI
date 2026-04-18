@@ -112,6 +112,7 @@
     "maxConcurrentSessions": 8
   },
   "plugins": {
+    "allow": ["acpx"],
     "entries": {
       "acpx": {
         "enabled": true,
